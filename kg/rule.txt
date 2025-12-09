@@ -1,0 +1,16 @@
+//Exceeds Expectations Rule
+MATCH (hotel:Hotel)
+      <-[:REVIEWED]-(review:Review)
+      <-[:WROTE]-(traveller:Traveller {type: 'Solo', gender: 'Female'})
+      WITH traveller.age AS age_group, hotel,
+           (hotel.cleanliness_base + hotel.comfort_base + hotel.facilities_base) AS base_sum,
+           avg(review.score_cleanliness + review.score_comfort + review.score_facilities) AS avg_review_sum
+WHERE base_sum >= avg_review_sum
+WITH age_group, hotel,
+     (((base_sum - avg_review_sum) / avg_review_sum)) AS improve
+
+RETURN age_group,
+       round (min(improve) * 100, 2) AS min_improve,
+       round (max(improve) * 100, 2) AS max_improve,
+       round (avg(improve) * 100, 2) AS avg_improve
+ORDER BY age_group
