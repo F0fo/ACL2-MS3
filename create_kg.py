@@ -40,10 +40,10 @@ def clearDB(session):
 
 
 #Load data from CSV
-hotelsDF = pd.read_csv('hotels.csv')
-usersDF = pd.read_csv('users.csv')
-reviewsDF = pd.read_csv('reviews.csv')
-visaDF = pd.read_csv('visa.csv')
+hotelsDF = pd.read_csv('./data/hotels.csv')
+usersDF = pd.read_csv('./data/users.csv')
+reviewsDF = pd.read_csv('./data/reviews.csv')
+visaDF = pd.read_csv('./data/visa.csv')
 
 #to test if it properly loaded in
 print(f"Loaded {len(hotelsDF)} hotels")
