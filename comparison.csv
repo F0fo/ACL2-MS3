@@ -1,0 +1,62 @@
+model,latency_sec,input_tokens,output_tokens,total_tokens,input_cost_usd,output_cost_usd,total_cost_usd,semantic_accuracy,response
+Gemma-2-2B,3.226,11,551,562,1e-06,0.00011,0.000111,0.617,"Here's a breakdown of what should be included in Milestone 1 of your project report, based on the provided context:
+
+**1. Project Overview**
+
+* **Introduction:** Briefly describe the project's goal, the dataset you're working with, and the overall problem you're trying to solve.
+* **Data Description:**  Provide a concise summary of your dataset's characteristics (size, features, data types, etc.). Include any relevant information about data sources or preprocessing steps.
+
+**2. Data Cleaning and Preprocessing**
+
+* **Data Exploration:**  Present a clear overview of your data exploration process. Include:
+    * **Descriptive Statistics:**  Summarize key statistics (mean, median, standard deviation, etc.) for relevant features.
+    * **Visualization:**  Use plots (histograms, box plots, scatter plots, etc.) to illustrate data distributions, relationships, and potential issues.
+    * **Data Cleaning:**  Describe the steps you took to clean the data (handling missing values, outliers, inconsistencies, etc.). Include any code snippets or explanations.
+    * **Feature Engineering:**  Explain the rationale behind any new features you created. Include code for feature engineering steps.
+
+**3. Model Selection and Training**
+
+* **Model Choice:**  Clearly state the model(s) you selected for your project. Justify your choice based on:
+    * **Task Requirements:**  How does the model align with the specific goals of your project?
+    * **Dataset Characteristics:**  How does the model's structure and complexity match the nature of your data?
+    * **Previous Research:**  Are there any established models that are relevant to your problem?
+* **Training Process:**  Describe the steps involved in training your model:
+    * **Hyperparameter Tuning:**  Explain how you tuned hyperparameters to optimize model performance.
+    * **Training and Validation:**  Describe how you split your data into training and validation sets.
+    * **Metrics:**  Report the metrics you used to evaluate model performance (e.g., accuracy, precision, recall, F1-score, AUC).
+    * **Training Progress:**  Include plots showing the model's performance over time during training.
+
+**4. Evaluation and Analysis**
+
+* **Evaluation Metrics:**  Clearly state the evaluation metrics you used (e.g., accuracy, precision, recall, F1-score,"
+Mistral-7B,11.349,11,281,292,2e-06,0.000169,0.000171,0.526," For Milestone 1 of the project report, the following components should be included:
+
+1. Data Cleaning: A description of the data cleaning process, including the rationale behind each step and evidence such as plots or numbers to support the choices made.
+2. Data Analysis: An analysis of the data, including any insights gained and visualizations of the results.
+3. Feature Selection: A description of the chosen features, the reason for their selection, and evidence to support the decision.
+4. Data Pre-processing and Feature Engineering: A description of the steps taken for data pre-processing and feature engineering, including the need for each step, its effect on the data distribution, and any performance reports.
+5. Log Transform: A justification for why a log transform was used, including a comparison of the EDA results before and after the transform.
+6. Correct Order and Documentation: A clear and logical order of steps with clear markdown explanations that justify the choices made.
+7. Limitations: A report of the performance of the steps throughout training and validation, as well as on unseen test data, along with any limitations.
+8. Inference Function: A description of the inference function used, including explanations of both the global and local explanations, and plots and explanations of the explanations in the report.
+
+It is important to remember that each team member must be able to explain and justify every step in the report."
+LLaMA-3.1-8B,6.439,11,463,474,3e-06,0.00037,0.000374,0.634,"Based on the provided context, the following should be included in the report for Milestone 1:
+
+1. **Data Cleaning**: Explain and justify every step in the context of the project, including the need for each step and its effect on the data distribution, range, values, etc.
+2. **Data Analysis**: Include plots and results from data-engineering questions, along with reasoning and justification.
+3. **Plotting the results**: Include plots of the results for each step.
+4. **Answering Data Engineering Questions**: Answer questions in a markdown in the notebook, and add it to the report.
+5. **Feature Selection**: Explain the reason for the chosen features, report evidence, and plot the effect of the features.
+6. **Data Pre-processing and Feature Engineering**: Understand the step, need for the step, and effect on the data distribution, range, values, etc.
+7. **Prediction Model**: Include the model choice, how it works, its limitations, reporting its performance throughout training and validation, and reporting its performance on the unseen test data.
+8. **Inference Function**: Include XAI (Explainable AI), Global Explanation, Local Explanation, and plot and explain the explanations in the report.
+9. **Comparative Results**: Compare multiple approaches, investigate more than one approach when trying to improve performance (different features, preprocessing pipelines, models, hyperparameters, etc.), and report comparative results.
+10. **Baseline Requirement**: Include a baseline for architecture choices, with a clear explanation of the baseline and after results for the complete pipeline, and explain why the added step improved or worsened performance.
+
+Additionally, the report should include:
+
+* Correct order and documentation: Steps must follow logical order and include clear markdown explanations that justify choices.
+* All plots and Data Engineering answers included: Every plot, result from data-engineering questions, and the reasoning/justification must be included.
+* Evidence: Include plots, numbers, statistics, or references to experiments to support explanations.
+* Justification: Justify every step, including the need for each step and its effect on the data distribution, range, values, etc."

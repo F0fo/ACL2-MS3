@@ -2,6 +2,14 @@ neo4j>=5.0.0
 pandas>=2.0.0
 python-dotenv>=1.0.0
 torch>=2.0.0
-transformers>=4.30.0
 datasets>=2.0.0
 evaluate>=0.4.0
+
+transformers==4.46.1
+sentence-transformers==3.2.1
+langchain==0.3.7
+langchain-community==0.3.7
+langchain-core==0.3.17
+langchain-huggingface==0.1.2
+tokenizers==0.20.1
+pyarrow==21.0.0
