@@ -297,3 +297,15 @@ class GraphRetriever:
         with self.driver.session() as session:
             return session.run(query).data()   
         
+    #29. get hotels based on one of it's base ratings
+
+    #30. Compare two hotels
+    def compare_two_hotels(self, hotel_name, hotel_name_2):
+        query = """
+        MATCH (h1:Hotel {name: $hotel1}), (h2:Hotel {name: $hotel2})
+        RETURN h1.name AS hotel1, h1.star_rating AS rating1,
+               h2.name AS hotel2, h2.star_rating AS rating2
+        """
+        with self.driver.session() as session:
+            return session.run(query, hotel1=hotel_name, hotel2=hotel_name).data()
+        
