@@ -297,14 +297,43 @@ class GraphRetriever:
         with self.driver.session() as session:
             return session.run(query).data()   
         
-    #29. get hotels based on one of it's base ratings
+    #29. get hotels based on one of it's cleanliness base
+    def get_hotels_by_cleanliness_rating(self, min_cleanliness_base):
+        query = """
+        MATCH (h:Hotel)
+        WHERE h.cleanliness_rating >= $min_cleanliness_base
+        RETURN h.name AS hotel, h.cleanliness_base AS cleanliness_base
+        ORDER BY h.cleanliness_rating DESC
+        """
+        with self.driver.session() as session:
+            return session.run(query, min_cleanliness_base=min_cleanliness_base).data()
+    
+    def get_hotels_by_comfort_base(self, min_comfort_base):
+        query = """
+        MATCH (h:Hotel)
+        WHERE h.comfort_rating >= $min_comfort_base
+        RETURN h.name AS hotel, h.comfort_base AS comfort_base
+        ORDER BY h.comfort_rating DESC
+        """
+        with self.driver.session() as session:
+            return session.run(query, min_comfort_base=min_comfort_base).data()
+        
+    def get_hotels_by_facilities_base(self, min_facilities_base):
+        query = """
+        MATCH (h:Hotel)
+        WHERE h.facilities_rating >= $min_facilities_base
+        RETURN h.name AS hotel, h.facilities_base AS facilities_base
+        ORDER BY h.facilities_rating DESC
+        """
+        with self.driver.session() as session:
+            return session.run(query, min_facilities_base=min_facilities_base).data()
 
     #30. Compare two hotels
     def compare_two_hotels(self, hotel_name, hotel_name_2):
         query = """
         MATCH (h1:Hotel {name: $hotel1}), (h2:Hotel {name: $hotel2})
-        RETURN h1.name AS hotel1, h1.star_rating AS rating1,
-               h2.name AS hotel2, h2.star_rating AS rating2
+        RETURN h1,
+               h2
         """
         with self.driver.session() as session:
             return session.run(query, hotel1=hotel_name, hotel2=hotel_name).data()
