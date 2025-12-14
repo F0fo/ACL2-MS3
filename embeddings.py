@@ -1,463 +1,497 @@
 
-import os
-import pickle
-import faiss
-import numpy as np
+
 import pandas as pd
+import numpy as np
 from neo4j import GraphDatabase
 from neo4j.exceptions import ClientError
 from db_manager import DBManager
+import pickle
+import os
+import faiss
+from sentence_transformers import SentenceTransformer
 
 
-class EmbeddingRetriever:
+class DualEmbeddingRetriever:
+
     
     # Configuration
-    GRAPH_NAME = "travelGraph"
-    EMBEDDING_PROP = "node2vecEmbedding"
-    VECTOR_INDEX = "hotel_node2vec_index"
-
-    FAISS_INDEX_PATH = "faiss_hotel_index.bin"
+    NODE2VEC_PROP = "node2vecEmbedding"
+    TEXT_EMBEDDING_PROP = "textEmbedding"
+    NODE2VEC_DIM = 128
+    TEXT_DIM = 384  # all-MiniLM-L6-v2
+    
+    # FAISS files
+    FAISS_NODE2VEC_PATH = "hotel_node2vec.index"
+    FAISS_TEXT_PATH = "hotel_text.index"
     HOTEL_MAPPING_PATH = "hotel_mapping.pkl"
     
-    
     def __init__(self, driver):
+        """Initialize with Neo4j driver"""
         self.driver = driver
-        self.faiss_index = None  
-        self.hotel_id_to_idx = {}  
-        self.idx_to_hotel_id = {}  
+        
+        # Two FAISS indices
+        self.faiss_node2vec = None  # For hotel similarity
+        self.faiss_text = None       # For query matching
+        
+        # Mappings
+        self.hotel_id_to_idx = {}
+        self.idx_to_hotel_id = {}
+        
+        # Text model for creating embeddings
+        print(" Loading Sentence Transformer...")
+        self.text_model = SentenceTransformer('all-MiniLM-L6-v2')
+        print(" ✓ Model loaded")
     
-    def create_graph(self):
-        
-        drop_query = f"""
-        CALL gds.graph.drop('{self.GRAPH_NAME}', false)
-        YIELD graphName
+    def generate_text_embeddings(self, batch_size=32):
         """
-        
-        create_query = f"""
-        CALL gds.graph.project(
-          '{self.GRAPH_NAME}',
-          ['Hotel', 'City', 'Country', 'Traveller', 'Review'],
-          {{
-            LOCATED_IN: {{orientation: 'UNDIRECTED'}},
-            REVIEWED: {{orientation: 'UNDIRECTED'}},
-            WROTE: {{orientation: 'UNDIRECTED'}},
-            FROM_COUNTRY: {{orientation: 'UNDIRECTED'}},
-            STAYED_AT: {{orientation: 'UNDIRECTED'}}
-          }}
-        )
+        Generate text embeddings for all hotels
+        Combines hotel name + reviews into text representation
         """
+        print("\n Generating text embeddings for hotels...")
         
-        with self.driver.session() as session:
-            # Try to drop existing graph
-            try:
-                session.run(drop_query)
-                print("  ✓ Dropped existing graph projection")
-            except ClientError as e:
-                if "not found" not in str(e).lower():
-                    print(f"Warning: Could not drop graph: {e}")
-            
-            # Create new graph projection
-            try:
-                result = session.run(create_query)
-                data = result.data()[0]
-                print(f"  ✓ Graph created: {data['nodeCount']} nodes, {data['relationshipCount']} relationships")
-                return data
-            except ClientError as e:
-                print(f" Error creating graph: {e}")
-                raise
-    
-    def run_node2vec(self):
-        print("\n Running Node2Vec algorithm...")
-        
-        query = f"""
-        CALL gds.node2vec.write(
-          '{self.GRAPH_NAME}',
-          {{
-            writeProperty: '{self.EMBEDDING_PROP}',
-            embeddingDimension: 128,
-            walkLength: 40,
-            iterations: 10,
-            walkBufferSize: 1000,
-            randomSeed: 42
-          }}
-        )
-        """
-        
-        with self.driver.session() as session:
-            try:
-                result = session.run(query)
-                data = result.data()[0]
-                print(f"  ✓ Node2Vec complete:")
-                print(f"    - Nodes processed: {data.get('nodePropertiesWritten', 'N/A')}")
-                print(f"    - Computation time: {data.get('computeMillis', 0)/1000:.2f}s")
-                return data
-            except ClientError as e:
-                print(f" Error running Node2Vec: {e}")
-                raise
-    
-    def build_faiss_index(self):
-        query = f"""
-        MATCH (h:Hotel)
-        WHERE h.{self.EMBEDDING_PROP} IS NOT NULL
-        RETURN h.hotel_id AS hotel_id, 
-            h.name AS name, 
-            h.{self.EMBEDDING_PROP} AS embedding
-        """
-        with self.driver.session() as session:
-            results = session.run(query)
-            records = results.data()
-        if not records:
-            print(" No hotel embeddings found to build FAISS index")
-            return False
-        print(f"\n Building FAISS index for {len(records)} hotels...")
-
-        embeddings = []
-        for idx, record in enumerate(records):
-            hotel_id = record['hotel_id']
-            embedding = np.array(record['embedding']).astype('float32')
-            embeddings.append(embedding)
-            self.hotel_id_to_idx[hotel_id] = idx
-            self.idx_to_hotel_id[idx] = hotel_id
-        embedding_matrix = np.vstack(embeddings)
-        print(f"  ✓ Embedding matrix shape: {embedding_matrix.shape}")
-
-        #Normalize for cosine similarity - like lab
-        faiss.normalize_L2(embedding_matrix)
-
-        #Create FAISS index
-        self.faiss_index = faiss.IndexFlatIP(embedding_matrix.shape[1])
-        self.faiss_index.add(embedding_matrix)
-        print(f"  ✓ FAISS index created with {self.faiss_index.ntotal} vectors")
-        return True
-    
-    def save_faiss_index(self):
-        if self.faiss_index is None:
-            print(" FAISS index not built yet")
-            return False
-        faiss.write_index(self.faiss_index, self.FAISS_INDEX_PATH)
-        print(f"  ✓ FAISS index saved to {self.FAISS_INDEX_PATH}")
-
-        #Save mappings
-        with open(self.HOTEL_MAPPING_PATH, 'wb') as f:
-            pickle.dump({
-                'hotel_id_to_idx': self.hotel_id_to_idx,
-                'idx_to_hotel_id': self.idx_to_hotel_id
-            }, f)
-
-    def load_faiss_index(self):
-        if not os.path.exists(self.FAISS_INDEX_PATH):
-            print(f"  Index not found at {self.FAISS_INDEX_PATH}")
-            return False
-        self.faiss_index = faiss.read_index(self.FAISS_INDEX_PATH)
-        print(f"  ✓ FAISS index loaded from {self.FAISS_INDEX_PATH}")
-
-        with open(self.HOTEL_MAPPING_PATH, 'rb') as f:
-            mappings = pickle.load(f)
-        self.hotel_id_to_idx = mappings['hotel_id_to_idx']
-        self.idx_to_hotel_id = mappings['idx_to_hotel_id']
-        return True
-
-
-    def verify_embeddings_exist(self):
-        """Check if embeddings have been created for hotels"""
-        print("\n Verifying embeddings...")
-        
-        query = f"""
-        MATCH (h:Hotel)
-        RETURN 
-            count(h) as total_hotels,
-            count(h.{self.EMBEDDING_PROP}) as hotels_with_embeddings
-        """
-        
-        with self.driver.session() as session:
-            try:
-                result = session.run(query)
-                data = result.single()
-                total = data['total_hotels']
-                with_embeddings = data['hotels_with_embeddings']
-                
-                print(f" Hotels with embeddings: {with_embeddings}/{total}")
-                
-                if with_embeddings == 0:
-                    print("No embeddings found!")
-                    return False
-                elif with_embeddings < total:
-                    print(f"Warning: {total - with_embeddings} hotels missing embeddings")
-                else:
-                    print(" All hotels have embeddings")
-                
-                return with_embeddings > 0
-                
-            except Exception as e:
-                print(f" Error verifying embeddings: {e}")
-                return False
-    
- 
-        """Find similar hotels based on embeddings
-        
-        Args:
-            hotel_name: Name of the hotel to find similar hotels for
-            top_k: Number of similar hotels to return
-            
-        Returns:
-            List of dictionaries with hotel names and similarity scores
-        """
-        query = f"""
-        MATCH (h:Hotel {{name: $hotel}})
-        WHERE h.{self.EMBEDDING_PROP} IS NOT NULL
-        CALL db.index.vector.queryNodes(
-          '{self.VECTOR_INDEX}',
-          $k + 1,
-          h.{self.EMBEDDING_PROP}
-        )
-        YIELD node, score
-        WHERE node.name <> $hotel
-        RETURN node.name AS hotel, node.hotel_id AS hotel_id, score
-        ORDER BY score DESC
-        LIMIT $k
-        """
-        
-        with self.driver.session() as session:
-            try:
-                result = session.run(query, hotel=hotel_name, k=top_k)
-                return result.data()
-            except Exception as e:
-                print(f" Error finding similar hotels: {e}")
-                return []
-    
-    def find_similar_hotels(self, hotel_name, top_k=5):
-        """Find similar hotels based on embeddings
-        
-        Args:
-            hotel_name: Name of the hotel to find similar hotels for
-            top_k: Number of similar hotels to return
-            
-        Returns:
-            List of dictionaries with hotel names and similarity scores
-        """
-        query = f"""
-        MATCH (h:Hotel {{name: $hotel}})
-        ReTURN h.hotel_id AS hotel_id
-        """
-        
-        with self.driver.session() as session:
-            result = session.run(query, hotel=hotel_name)
-            record = result.single()
-
-            if not record:
-                print(f" Hotel '{hotel_name}' not found in database")
-                return []
-            hotel_id = record['hotel_id']
-
-        #get position of retrieved hotel in faiss index    
-        if hotel_id not in self.hotel_id_to_idx:
-            print(f" Hotel '{hotel_name}' does not have an embedding")
-            return []
-        
-        idx = self.hotel_id_to_idx[hotel_id]
-
-        #get query vector
-        query_vector = self.faiss_index.reconstruct(idx)
-        query_vector = query_vector.reshape(1, -1)
-
-        #search for similar vectors in faiss index
-        D, I = self.faiss_index.search(query_vector, top_k + 1)  # +1 to skip itself
-
-        similar_hotels = []
-        scores = []
-
-        for i, score in zip(I[0], D[0]):
-            result_hotel_id = self.idx_to_hotel_id[i]
-            if result_hotel_id == hotel_id:
-                continue  #skip itself
-            similar_hotels.append(result_hotel_id)
-            scores.append(score)
-
-            if len(similar_hotels) >= top_k:
-                break
-
-        query = """
-        UNWIND $hotel_ids as hotel_id
-        MATCH (h:Hotel {hotel_id: hotel_id})
-        RETURN h.hotel_id as hotel_id, h.name as name
-        """
-        with self.driver.session() as session:
-            result = session.run(query, hotel_ids=similar_hotels)
-            hotel_details = {record['hotel_id']: record for record in result.data()}
-            
-        final_results = []
-        for hid, score in zip(similar_hotels, scores):
-            if hid in hotel_details:
-                final_results.append({
-                    'hotel': hotel_details[hid]['name'],
-                    'hotel_id': hid,
-                    'score': score
-                })
-        return final_results
-    
-    def get_hotel_by_id(self, hotel_id):
-        """Get hotel name by ID"""
-        query = """
-        MATCH (h:Hotel {hotel_id: $hotel_id})
-        RETURN h.name as name
-        """
-        
-        with self.driver.session() as session:
-            result = session.run(query, hotel_id=hotel_id)
-            record = result.single()
-            return record['name'] if record else None
-    
-    def get_random_hotel(self):
-        """Get a random hotel from the database"""
+        # Fetch hotels and their reviews
         query = """
         MATCH (h:Hotel)
-        WHERE h.node2vecEmbedding IS NOT NULL
-        RETURN h.name as name, h.hotel_id as hotel_id
-        ORDER BY rand()
-        LIMIT 1
+        OPTIONAL MATCH (r:Review)-[:REVIEWED]->(h)
+        WITH h, 
+             collect(r.text)[0..10] as reviews,  // First 10 reviews
+             h.name as name,
+             h.star_rating as stars
+        RETURN h.hotel_id as hotel_id,
+               name,
+               stars,
+               reviews
+        ORDER BY hotel_id
         """
         
         with self.driver.session() as session:
             result = session.run(query)
-            record = result.single()
-            if record:
-                return record['name'], record['hotel_id']
-            return None, None
+            records = result.data()
+        
+        print(f" Processing {len(records)} hotels...")
+        
+        embeddings_to_save = []
+        
+        for i in range(0, len(records), batch_size):
+            batch = records[i:i+batch_size]
+            
+            # Create text representations
+            hotel_texts = []
+            hotel_ids = []
+            
+            for record in batch:
+                hotel_id = record['hotel_id']
+                name = record['name']
+                stars = record['stars'] if record['stars'] else 0
+                reviews = record['reviews']
+                
+                # Combine into a single text representation
+                # This captures what the hotel is about
+                text_parts = [
+                    f"Hotel name: {name}",
+                    f"Star rating: {stars} stars"
+                ]
+                
+                if reviews:
+                    # Add review content
+                    review_text = " ".join([r for r in reviews if r])
+                    text_parts.append(f"Reviews: {review_text[:500]}")  # Limit length
+                
+                combined_text = ". ".join(text_parts)
+                
+                hotel_texts.append(combined_text)
+                hotel_ids.append(hotel_id)
+            
+            # Generate embeddings for batch
+            batch_embeddings = self.text_model.encode(
+                hotel_texts, 
+                show_progress_bar=False,
+                batch_size=batch_size
+            )
+            
+            # Prepare for Neo4j
+            for hotel_id, embedding in zip(hotel_ids, batch_embeddings):
+                embeddings_to_save.append({
+                    'hotel_id': hotel_id,
+                    'embedding': embedding.tolist()
+                })
+            
+            if (i // batch_size + 1) % 10 == 0:
+                print(f"    Processed {i + len(batch)}/{len(records)}...")
+        
+        # Save to Neo4j
+        print("  Saving text embeddings to Neo4j...")
+        
+        with self.driver.session() as session:
+            session.run("""
+                UNWIND $embeddings as emb
+                MATCH (h:Hotel {hotel_id: emb.hotel_id})
+                SET h.textEmbedding = emb.embedding
+            """, embeddings=embeddings_to_save)
+        
+        print(f"  ✓ Text embeddings created for {len(embeddings_to_save)} hotels")
     
-    def setup_embeddings(self):
-        """Complete setup process: create graph, run node2vec, create index"""
-        print("\n" + "="*60)
-        print("SETTING UP NODE2VEC EMBEDDINGS")
-        print("="*60)
+    def build_faiss_indices(self):
+        """Build TWO FAISS indices: Node2Vec and Text"""
+        print("\n Building FAISS indices...")
+        
+        # Fetch both embeddings from Neo4j
+        query = f"""
+        MATCH (h:Hotel)
+        WHERE h.{self.NODE2VEC_PROP} IS NOT NULL 
+          AND h.{self.TEXT_EMBEDDING_PROP} IS NOT NULL
+        RETURN h.hotel_id as hotel_id,
+               h.{self.NODE2VEC_PROP} as node2vec_embedding,
+               h.{self.TEXT_EMBEDDING_PROP} as text_embedding
+        ORDER BY hotel_id
+        """
+        
+        with self.driver.session() as session:
+            result = session.run(query)
+            records = result.data()
+        
+        if not records:
+            print("  No hotels with both embeddings found")
+            return False
+        
+        print(f"  Found {len(records)} hotels with both embeddings")
+        
+        # Prepare embedding matrices
+        node2vec_list = []
+        text_list = []
+        
+        for idx, record in enumerate(records):
+            hotel_id = record['hotel_id']
+            
+            node2vec_emb = np.array(record['node2vec_embedding'], dtype='float32')
+            text_emb = np.array(record['text_embedding'], dtype='float32')
+            
+            node2vec_list.append(node2vec_emb)
+            text_list.append(text_emb)
+            
+            # Create mappings
+            self.hotel_id_to_idx[hotel_id] = idx
+            self.idx_to_hotel_id[idx] = hotel_id
+        
+        # Stack into matrices
+        node2vec_matrix = np.vstack(node2vec_list)
+        text_matrix = np.vstack(text_list)
+        
+        print(f" Node2Vec matrix: {node2vec_matrix.shape}")
+        print(f" Text matrix: {text_matrix.shape}")
+        
+        # Normalize for cosine similarity
+        faiss.normalize_L2(node2vec_matrix)
+        faiss.normalize_L2(text_matrix)
+        
+        # Build FAISS indices
+        print(" Building indices...")
+        
+        # Index 1: Node2Vec (for hotel similarity)
+        self.faiss_node2vec = faiss.IndexFlatIP(self.NODE2VEC_DIM)
+        self.faiss_node2vec.add(node2vec_matrix)
+        print(f"    ✓ Node2Vec index: {self.faiss_node2vec.ntotal} vectors")
+        
+        # Index 2: Text (for query matching)
+        self.faiss_text = faiss.IndexFlatIP(self.TEXT_DIM)
+        self.faiss_text.add(text_matrix)
+        print(f"    ✓ Text index: {self.faiss_text.ntotal} vectors")
+        
+        return True
+    
+    def save_faiss_indices(self):
+        """Save both FAISS indices to disk"""
+        print("\n Saving FAISS indices...")
         
         try:
-            # Step 1: Create graph projection
-            self.create_graph()
+            # Save Node2Vec index
+            faiss.write_index(self.faiss_node2vec, self.FAISS_NODE2VEC_PATH)
+            print(f"  ✓ Node2Vec saved to {self.FAISS_NODE2VEC_PATH}")
             
-            # Step 2: Run Node2Vec
-            self.run_node2vec()
+            # Save Text index
+            faiss.write_index(self.faiss_text, self.FAISS_TEXT_PATH)
+            print(f"  ✓ Text saved to {self.FAISS_TEXT_PATH}")
             
-            # Step 3: Verify embeddings
-            if not self.verify_embeddings_exist():
-                print("\n Setup failed: No embeddings created")
-                return False
+            # Save mappings
+            with open(self.HOTEL_MAPPING_PATH, 'wb') as f:
+                pickle.dump({
+                    'hotel_id_to_idx': self.hotel_id_to_idx,
+                    'idx_to_hotel_id': self.idx_to_hotel_id
+                }, f)
+            print(f"  ✓ Mappings saved to {self.HOTEL_MAPPING_PATH}")
             
-            # Step 4: Create FAISS index
-            if not self.build_faiss_index():
-                print("\n failed: Could not build FAISS index")
+            return True
+        except Exception as e:
+            print(f"  ❌ Error saving: {e}")
+            return False
+    
+    def load_faiss_indices(self):
+        """Load both FAISS indices from disk"""
+        print("\n Loading FAISS indices...")
+        
+        required_files = [
+            self.FAISS_NODE2VEC_PATH,
+            self.FAISS_TEXT_PATH,
+            self.HOTEL_MAPPING_PATH
+        ]
+        
+        for file in required_files:
+            if not os.path.exists(file):
+                print(f"  Missing: {file}")
                 return False
         
-            # Step 5: Save FAISS index (NEW)
-            self.save_faiss_index()
+        try:
+            # Load indices
+            self.faiss_node2vec = faiss.read_index(self.FAISS_NODE2VEC_PATH)
+            print(f"  ✓ Node2Vec loaded ({self.faiss_node2vec.ntotal} vectors)")
             
-            print("\n" + "="*60)
-            print("EMBEDDING SETUP COMPLETE")
-            print("="*60)
+            self.faiss_text = faiss.read_index(self.FAISS_TEXT_PATH)
+            print(f"  ✓ Text loaded ({self.faiss_text.ntotal} vectors)")
+            
+            # Load mappings
+            with open(self.HOTEL_MAPPING_PATH, 'rb') as f:
+                mappings = pickle.load(f)
+            self.hotel_id_to_idx = mappings['hotel_id_to_idx']
+            self.idx_to_hotel_id = mappings['idx_to_hotel_id']
+            print(f"  ✓ Mappings loaded ({len(self.hotel_id_to_idx)} hotels)")
+            
+            return True
+        except Exception as e:
+            print(f" Error loading: {e}")
+            return False
+    
+    # ==================== SEARCH METHODS ====================
+    
+    def find_similar_hotels(self, hotel_name, top_k=5):
+        
+        print(f"\n Searching similar hotels to: '{hotel_name}'")
+        
+        # Get hotel_id
+        query = "MATCH (h:Hotel {name: $name}) RETURN h.hotel_id as hotel_id"
+        
+        with self.driver.session() as session:
+            result = session.run(query, name=hotel_name)
+            record = result.single()
+            
+            if not record:
+                print(f"  Hotel not found")
+                return []
+            
+            hotel_id = record['hotel_id']
+        
+        # Get index position
+        if hotel_id not in self.hotel_id_to_idx:
+            print(f"  Hotel not in index")
+            return []
+        
+        idx = self.hotel_id_to_idx[hotel_id]
+        
+        # Get Node2Vec embedding
+        query_vector = self.faiss_node2vec.reconstruct(idx).reshape(1, -1)
+        
+        # Search Node2Vec index
+        distances, indices = self.faiss_node2vec.search(query_vector, top_k + 1)
+        
+        # Get results (skip query hotel)
+        similar_hotel_ids = []
+        scores = []
+        
+        for i, score in zip(indices[0], distances[0]):
+            result_hotel_id = self.idx_to_hotel_id[i]
+            if result_hotel_id == hotel_id:
+                continue
+            similar_hotel_ids.append(result_hotel_id)
+            scores.append(float(score))
+            if len(similar_hotel_ids) >= top_k:
+                break
+        
+        # Enrich with details
+        return self._enrich_results(similar_hotel_ids, scores, "Node2Vec similarity")
+    
+    def search_by_query(self, query_text, top_k=5):
+        
+        print(f"\n Searching by query: '{query_text}'")
+        
+        # Convert query to text embedding (SAME model as hotels!)
+        query_embedding = self.text_model.encode([query_text])[0]
+        query_embedding = query_embedding.astype('float32').reshape(1, -1)
+        
+        # Normalize
+        faiss.normalize_L2(query_embedding)
+        
+        # Search TEXT index (both in same 384-dim space!)
+        distances, indices = self.faiss_text.search(query_embedding, top_k)
+        
+        # Get hotel IDs
+        hotel_ids = [self.idx_to_hotel_id[idx] for idx in indices[0]]
+        scores = distances[0].tolist()
+        
+        # Enrich with details
+        return self._enrich_results(hotel_ids, scores, "Semantic text match")
+    
+    def _enrich_results(self, hotel_ids, scores, method):
+        """Add hotel details to results"""
+        if not hotel_ids:
+            return []
+        
+        query = """
+        UNWIND $hotel_ids as hotel_id
+        MATCH (h:Hotel {hotel_id: hotel_id})
+        OPTIONAL MATCH (r:Review)-[:REVIEWED]->(h)
+        WITH h, avg(r.score_overall) as avg_rating, count(r) as review_count
+        RETURN h.hotel_id as hotel_id,
+               h.name as name,
+               h.star_rating as star_rating,
+               avg_rating,
+               review_count
+        """
+        
+        with self.driver.session() as session:
+            result = session.run(query, hotel_ids=hotel_ids)
+            hotel_details = {r['hotel_id']: r for r in result.data()}
+        
+        # Combine
+        results = []
+        for hotel_id, score in zip(hotel_ids, scores):
+            if hotel_id in hotel_details:
+                hotel = dict(hotel_details[hotel_id])
+                hotel['score'] = score
+                hotel['method'] = method
+                results.append(hotel)
+        
+        return results
+    
+    def setup_all(self):
+        """Complete setup: Generate text embeddings + build indices"""
+        print("\n" + "="*70)
+        print("DUAL EMBEDDING SETUP")
+        print("="*70)
+        
+        try:
+            # Step 1: Generate text embeddings (if not exists)
+            print("\n Checking for text embeddings...")
+            query = "MATCH (h:Hotel) WHERE h.textEmbedding IS NOT NULL RETURN count(h) as count"
+            with self.driver.session() as session:
+                result = session.run(query)
+                count = result.single()['count']
+            
+            if count == 0:
+                print("  No text embeddings found. Generating...")
+                self.generate_text_embeddings()
+            else:
+                print(f"  ✓ Found {count} hotels with text embeddings")
+            
+            # Step 2: Build FAISS indices
+            if not self.build_faiss_indices():
+                return False
+            
+            # Step 3: Save indices
+            if not self.save_faiss_indices():
+                return False
+            
+            print("\n" + "="*70)
+            print(" DUAL EMBEDDING SETUP COMPLETE")
+            print("="*70)
+            print("\n You now have:")
+            print(f"  • Node2Vec index ({self.NODE2VEC_DIM}D) - for hotel similarity")
+            print(f"  • Text index ({self.TEXT_DIM}D) - for query matching")
+            print("\n Usage:")
+            print('  retriever.find_similar_hotels("Grand Palace", top_k=5)')
+            print('  retriever.search_by_query("luxury hotels with spa", top_k=5)')
+            
             return True
             
         except Exception as e:
-            print(f"\nSetup failed: {e}")
+            print(f"\n Setup failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
 
 def main():
-    """Main execution function"""
+    """Test dual embedding retriever"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Hotel Similarity using Node2Vec Embeddings')
-    parser.add_argument('--setup', action='store_true', help='Setup embeddings (create graph, run node2vec, create index)')
-    parser.add_argument('--hotel', type=str, help='Hotel name to find similar hotels for')
-    parser.add_argument('--hotel-id', type=int, help='Hotel ID to find similar hotels for')
-    parser.add_argument('--top-k', type=int, default=5, help='Number of similar hotels to return (default: 5)')
-    parser.add_argument('--random', action='store_true', help='Find similar hotels for a random hotel')
+    parser = argparse.ArgumentParser(description='Dual Embedding Hotel Retriever')
+    parser.add_argument('--setup', action='store_true', help='Setup embeddings and indices')
+    parser.add_argument('--hotel', type=str, help='Find similar hotels')
+    parser.add_argument('--query', type=str, help='Search by text query')
+    parser.add_argument('--top-k', type=int, default=5, help='Number of results')
     
     args = parser.parse_args()
     
     try:
-        # Initialize database manager
-        print(" Connecting to Neo4j...")
-        db_manager = DBManager()
+        # Initialize
+        print("🔌 Connecting to Neo4j...")
+        db = DBManager()
         
-        # Initialize embedding retriever
-        retriever = EmbeddingRetriever(db_manager.driver)
+        retriever = DualEmbeddingRetriever(db.driver)
         
-        # Setup embeddings if requested
+        # Setup
         if args.setup:
-            success = retriever.setup_embeddings()
+            success = retriever.setup_all()
             if not success:
-                db_manager.close()
+                db.close()
                 exit(1)
         
-        # Find similar hotels
-        if args.hotel or args.hotel_id or args.random:
-            # Verify embeddings exist
-            if not retriever.verify_embeddings_exist():
-                print("\n  No embeddings found. Run with --setup first:")
-                print("   python embedding_retriever.py --setup")
-                db_manager.close()
+        # Load indices
+        if args.hotel or args.query:
+            if not retriever.load_faiss_indices():
+                print("\n  Run --setup first!")
+                db.close()
                 exit(1)
-             # Try to load existing FAISS index
-            if not retriever.load_faiss_index():
-                print("\n  No FAISS index found. Run with --setup first:")
-                print("   python embedding_retriever.py --setup")
-                db_manager.close()
-                exit(1)
-            # Get hotel name
-            if args.random:
-                hotel_name, hotel_id = retriever.get_random_hotel()
-                if not hotel_name:
-                    print(" No hotels with embeddings found")
-                    db_manager.close()
-                    exit(1)
-                print(f"\n Random hotel selected: {hotel_name} (ID: {hotel_id})")
-            elif args.hotel_id:
-                hotel_name = retriever.get_hotel_by_id(args.hotel_id)
-                if not hotel_name:
-                    print(f" No hotel found with ID: {args.hotel_id}")
-                    db_manager.close()
-                    exit(1)
-            else:
-                hotel_name = args.hotel
-            
-            # Find similar hotels
-            print(f"\n Finding similar hotels to: '{hotel_name}'")
-            print(f"   (Top {args.top_k} results)\n")
-            
-            similar_hotels = retriever.find_similar_hotels(hotel_name, top_k=args.top_k)
-            
-            if similar_hotels:
-                print(" Similar Hotels:")
-                print("-" * 60)
-                for i, record in enumerate(similar_hotels, 1):
-                    print(f"{i}. {record['hotel']}")
-                    print(f"   Similarity Score: {record['score']:.4f}")
-                    print(f"   Hotel ID: {record['hotel_id']}")
-                    print()
-            else:
-                print(f" No similar hotels found for '{hotel_name}'")
-                print("   (Hotel may not exist or has no embedding)")
         
-        elif not args.setup:
-            # No action specified, show help
+        # Search by hotel similarity
+        if args.hotel:
+            results = retriever.find_similar_hotels(args.hotel, top_k=args.top_k)
+            print_results(results, f"Similar to '{args.hotel}'")
+        
+        # Search by text query
+        if args.query:
+            results = retriever.search_by_query(args.query, top_k=args.top_k)
+            print_results(results, f"Query: '{args.query}'")
+        
+        # Demo if no args
+        if not any([args.setup, args.hotel, args.query]):
             parser.print_help()
-            print("\nExamples:")
-            print("  # Setup embeddings")
-            print("  python embedding_retriever.py --setup")
-            print()
-            print("  # Find similar hotels")
-            print("  python embedding_retriever.py --hotel 'Hotel California' --top-k 10")
-            print()
-            print("  # Find similar hotels for random hotel")
-            print("  python embedding_retriever.py --random --top-k 5")
+            print("\n" + "="*70)
+            print("EXAMPLES:")
+            print("="*70)
+            print("\n# Setup (run once)")
+            print("python dual_embedding_retriever.py --setup")
+            print("\n# Hotel similarity (Node2Vec)")
+            print("python dual_embedding_retriever.py --hotel 'Grand Palace'")
+            print("\n# Query search (Text embeddings)")
+            print("python dual_embedding_retriever.py --query 'luxury hotels with spa'")
+            print("="*70)
         
-        # Close connection
-        db_manager.close()
+        db.close()
         
     except Exception as e:
         print(f"\n Error: {e}")
         import traceback
         traceback.print_exc()
-        exit(1)
+
+
+def print_results(results, title):
+    """Pretty print results"""
+    print("\n" + "="*70)
+    print(f" {title}")
+    print("="*70)
+    
+    if not results:
+        print("  No results found")
+        return
+    
+    for i, hotel in enumerate(results, 1):
+        print(f"\n{i}. {hotel['name']}")
+        print(f"    Star Rating: {hotel.get('star_rating', 'N/A')}")
+        if hotel.get('avg_rating'):
+            print(f"    Avg Review: {hotel['avg_rating']:.2f}")
+        print(f"    Score: {hotel['score']:.3f}")
+        print(f"    Method: {hotel['method']}")
+    
+    print("\n" + "="*70)
 
 
 if __name__ == "__main__":
