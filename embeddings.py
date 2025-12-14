@@ -1,5 +1,8 @@
 
-
+import os
+import pickle
+import faiss
+import numpy as np
 import pandas as pd
 from neo4j import GraphDatabase
 from neo4j.exceptions import ClientError
@@ -12,9 +15,16 @@ class EmbeddingRetriever:
     GRAPH_NAME = "travelGraph"
     EMBEDDING_PROP = "node2vecEmbedding"
     VECTOR_INDEX = "hotel_node2vec_index"
+
+    FAISS_INDEX_PATH = "faiss_hotel_index.bin"
+    HOTEL_MAPPING_PATH = "hotel_mapping.pkl"
+    
     
     def __init__(self, driver):
         self.driver = driver
+        self.faiss_index = None  
+        self.hotel_id_to_idx = {}  
+        self.idx_to_hotel_id = {}  
     
     def create_graph(self):
         
@@ -85,38 +95,69 @@ class EmbeddingRetriever:
                 print(f" Error running Node2Vec: {e}")
                 raise
     
-    def create_vector_index(self):
-        """Create vector index for similarity search"""
-        print("\n Creating vector index...")
-        
-        drop_query = f"""
-        DROP INDEX {self.VECTOR_INDEX} IF EXISTS
+    def build_faiss_index(self):
+        query = f"""
+        MATCH (h:Hotel)
+        WHERE h.{self.EMBEDDING_PROP} IS NOT NULL
+        RETURN h.hotel_id AS hotel_id, 
+            h.name AS name, 
+            h.{self.EMBEDDING_PROP} AS embedding
         """
-        
-        create_query = f"""
-        CREATE VECTOR INDEX {self.VECTOR_INDEX} IF NOT EXISTS
-        FOR (h:Hotel)
-        ON (h.{self.EMBEDDING_PROP})
-        OPTIONS {{
-          indexConfig: {{
-            `vector.dimensions`: 128,
-            `vector.similarity_function`: 'cosine'
-          }}
-        }}
-        """
-        
         with self.driver.session() as session:
-            try:
-                # Drop existing index
-                session.run(drop_query)
-                
-                # Create new index
-                session.run(create_query)
-                print(f"  ✓ Vector index '{self.VECTOR_INDEX}' created")
-            except ClientError as e:
-                print(f" Error creating vector index: {e}")
-                raise
+            results = session.run(query)
+            records = results.data()
+        if not records:
+            print(" No hotel embeddings found to build FAISS index")
+            return False
+        print(f"\n Building FAISS index for {len(records)} hotels...")
+
+        embeddings = []
+        for idx, record in enumerate(records):
+            hotel_id = record['hotel_id']
+            embedding = np.array(record['embedding']).astype('float32')
+            embeddings.append(embedding)
+            self.hotel_id_to_idx[hotel_id] = idx
+            self.idx_to_hotel_id[idx] = hotel_id
+        embedding_matrix = np.vstack(embeddings)
+        print(f"  ✓ Embedding matrix shape: {embedding_matrix.shape}")
+
+        #Normalize for cosine similarity - like lab
+        faiss.normalize_L2(embedding_matrix)
+
+        #Create FAISS index
+        self.faiss_index = faiss.IndexFlatIP(embedding_matrix.shape[1])
+        self.faiss_index.add(embedding_matrix)
+        print(f"  ✓ FAISS index created with {self.faiss_index.ntotal} vectors")
+        return True
     
+    def save_faiss_index(self):
+        if self.faiss_index is None:
+            print(" FAISS index not built yet")
+            return False
+        faiss.write_index(self.faiss_index, self.FAISS_INDEX_PATH)
+        print(f"  ✓ FAISS index saved to {self.FAISS_INDEX_PATH}")
+
+        #Save mappings
+        with open(self.HOTEL_MAPPING_PATH, 'wb') as f:
+            pickle.dump({
+                'hotel_id_to_idx': self.hotel_id_to_idx,
+                'idx_to_hotel_id': self.idx_to_hotel_id
+            }, f)
+
+    def load_faiss_index(self):
+        if not os.path.exists(self.FAISS_INDEX_PATH):
+            print(f"  Index not found at {self.FAISS_INDEX_PATH}")
+            return False
+        self.faiss_index = faiss.read_index(self.FAISS_INDEX_PATH)
+        print(f"  ✓ FAISS index loaded from {self.FAISS_INDEX_PATH}")
+
+        with open(self.HOTEL_MAPPING_PATH, 'rb') as f:
+            mappings = pickle.load(f)
+        self.hotel_id_to_idx = mappings['hotel_id_to_idx']
+        self.idx_to_hotel_id = mappings['idx_to_hotel_id']
+        return True
+
+
     def verify_embeddings_exist(self):
         """Check if embeddings have been created for hotels"""
         print("\n Verifying embeddings...")
@@ -151,7 +192,7 @@ class EmbeddingRetriever:
                 print(f" Error verifying embeddings: {e}")
                 return False
     
-    def find_similar_hotels(self, hotel_name, top_k=5):
+ 
         """Find similar hotels based on embeddings
         
         Args:
@@ -183,6 +224,76 @@ class EmbeddingRetriever:
             except Exception as e:
                 print(f" Error finding similar hotels: {e}")
                 return []
+    
+    def find_similar_hotels(self, hotel_name, top_k=5):
+        """Find similar hotels based on embeddings
+        
+        Args:
+            hotel_name: Name of the hotel to find similar hotels for
+            top_k: Number of similar hotels to return
+            
+        Returns:
+            List of dictionaries with hotel names and similarity scores
+        """
+        query = f"""
+        MATCH (h:Hotel {{name: $hotel}})
+        ReTURN h.hotel_id AS hotel_id
+        """
+        
+        with self.driver.session() as session:
+            result = session.run(query, hotel=hotel_name)
+            record = result.single()
+
+            if not record:
+                print(f" Hotel '{hotel_name}' not found in database")
+                return []
+            hotel_id = record['hotel_id']
+
+        #get position of retrieved hotel in faiss index    
+        if hotel_id not in self.hotel_id_to_idx:
+            print(f" Hotel '{hotel_name}' does not have an embedding")
+            return []
+        
+        idx = self.hotel_id_to_idx[hotel_id]
+
+        #get query vector
+        query_vector = self.faiss_index.reconstruct(idx)
+        query_vector = query_vector.reshape(1, -1)
+
+        #search for similar vectors in faiss index
+        D, I = self.faiss_index.search(query_vector, top_k + 1)  # +1 to skip itself
+
+        similar_hotels = []
+        scores = []
+
+        for i, score in zip(I[0], D[0]):
+            result_hotel_id = self.idx_to_hotel_id[i]
+            if result_hotel_id == hotel_id:
+                continue  #skip itself
+            similar_hotels.append(result_hotel_id)
+            scores.append(score)
+
+            if len(similar_hotels) >= top_k:
+                break
+
+        query = """
+        UNWIND $hotel_ids as hotel_id
+        MATCH (h:Hotel {hotel_id: hotel_id})
+        RETURN h.hotel_id as hotel_id, h.name as name
+        """
+        with self.driver.session() as session:
+            result = session.run(query, hotel_ids=similar_hotels)
+            hotel_details = {record['hotel_id']: record for record in result.data()}
+            
+        final_results = []
+        for hid, score in zip(similar_hotels, scores):
+            if hid in hotel_details:
+                final_results.append({
+                    'hotel': hotel_details[hid]['name'],
+                    'hotel_id': hid,
+                    'score': score
+                })
+        return final_results
     
     def get_hotel_by_id(self, hotel_id):
         """Get hotel name by ID"""
@@ -231,8 +342,13 @@ class EmbeddingRetriever:
                 print("\n Setup failed: No embeddings created")
                 return False
             
-            # Step 4: Create vector index
-            self.create_vector_index()
+            # Step 4: Create FAISS index
+            if not self.build_faiss_index():
+                print("\n failed: Could not build FAISS index")
+                return False
+        
+            # Step 5: Save FAISS index (NEW)
+            self.save_faiss_index()
             
             print("\n" + "="*60)
             print("EMBEDDING SETUP COMPLETE")
@@ -280,7 +396,12 @@ def main():
                 print("   python embedding_retriever.py --setup")
                 db_manager.close()
                 exit(1)
-            
+             # Try to load existing FAISS index
+            if not retriever.load_faiss_index():
+                print("\n  No FAISS index found. Run with --setup first:")
+                print("   python embedding_retriever.py --setup")
+                db_manager.close()
+                exit(1)
             # Get hotel name
             if args.random:
                 hotel_name, hotel_id = retriever.get_random_hotel()
