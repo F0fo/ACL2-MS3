@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="acl" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="acl" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="aclm3" project-jdk-type="Python SDK" />
 </project>
