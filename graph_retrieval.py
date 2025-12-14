@@ -38,7 +38,7 @@ class GraphRetriever:
         with self.driver.session() as session:
             return session.run(query, country=country).data()
 
-    #4. Get countries with hotels
+    #4. Get cities with hotels
     def get_cities_With_Hotels(self):
         query = """
         MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)
@@ -298,7 +298,7 @@ class GraphRetriever:
             return session.run(query).data()   
         
     #29. get hotels based on one of it's cleanliness base
-    def get_hotels_by_cleanliness_rating(self, min_cleanliness_base):
+    def get_hotels_by_cleanliness_base(self, min_cleanliness_base):
         query = """
         MATCH (h:Hotel)
         WHERE h.cleanliness_rating >= $min_cleanliness_base
@@ -336,5 +336,5 @@ class GraphRetriever:
                h2
         """
         with self.driver.session() as session:
-            return session.run(query, hotel1=hotel_name, hotel2=hotel_name).data()
+            return session.run(query, hotel1=hotel_name, hotel2=hotel_name_2).data()
         

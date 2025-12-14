@@ -1,6 +1,7 @@
 import spacy
 import pandas as pd
 
+# do python -m spacy download en_core_web_sm
 nlp = spacy.load("en_core_web_sm")
 
 # Load domain data
@@ -104,6 +105,7 @@ def get_cypher_params(entities):
 
     if entities["traveller_types"]:
         params["traveller_type"] = entities["traveller_types"][0]
+
 
     if entities["demographics"]:
         for d in entities["demographics"]:

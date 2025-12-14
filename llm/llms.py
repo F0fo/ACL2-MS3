@@ -21,7 +21,7 @@ import pandas as pd
 
 # 1) prepare vectordb
 #Load your PDF
-pdf_path = "./ms1_checklist.pdf"
+pdf_path = "../documents/ms1_checklist.pdf"
 
 reader = PdfReader(pdf_path)
 all_text = ""
