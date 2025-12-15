@@ -539,12 +539,12 @@ class DualEmbeddingRetriever:
         # Search TEXT index (both in same 384-dim space!)
         distances, indices = self.faiss_text.search(query_embedding, top_k)
         
-        # Get hotel IDs
-        hotel_ids = [self.idx_to_hotel_id[label][idx] for idx in indices[0]]
+        # Get node IDs
+        node_ids = [self.idx_to_node_id[label][idx] for idx in indices[0]]
         scores = distances[0].tolist()
         
         # Enrich with details
-        return self._enrich_results(hotel_ids, scores, "Semantic text match")
+        return self._enrich_results(label, node_ids, scores, "Semantic text match")
     
     def _enrich_results(self, label, node_ids, scores, method):
         """Add node details to results"""
