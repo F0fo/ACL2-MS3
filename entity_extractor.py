@@ -1,6 +1,7 @@
 import spacy
 import pandas as pd
 
+# run in terminal: python -m spacy download en_core_web_sm
 nlp = spacy.load("en_core_web_sm")
 
 # Load domain data
@@ -92,25 +93,41 @@ def get_cypher_params(entities):
         params["hotel_name"] = entities["hotels"][0]
         if len(entities["hotels"]) > 1:
             params["hotel_name_2"] = entities["hotels"][1]
+        else:
+            params["hotel_name_2"] = ""
+    else:
+        params["hotel_name"] = ""
+        params["hotel_name_2"] = ""
 
     if entities["cities"]:
         params["city"] = entities["cities"][0]
+    else:
+        params["city"] = ""
 
     if entities["countries"]:
         params["country"] = entities["countries"][0]
-        if len(entities["countries"]) > 1:
-            params["from_country"] = entities["countries"][0]
-            params["to_country"] = entities["countries"][1]
+    else:
+        params["country"] = ""
+
 
     if entities["traveller_types"]:
         params["traveller_type"] = entities["traveller_types"][0]
+    else:
+        params["traveller_type"] = ""
+
 
     if entities["demographics"]:
         for d in entities["demographics"]:
             if d in ["Male", "Female"]:
                 params["gender"] = d
+                params["age_group"] = ""
             else:
                 params["age_group"] = d
+                params["gender"] = ""
+    else:
+        params["gender"] = ""
+        params["age_group"] = ""
+
 
     return params
 
