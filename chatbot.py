@@ -7,9 +7,27 @@ from graph_retrieval import GraphRetriever
 from db_manager import DBManager
 #from embeddings import DualEmbeddingRetriever #search_by_query
 
+from pypdf import PdfReader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS as LCFAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain.chains import RetrievalQA
+from langchain_huggingface import ChatHuggingFace
+from langchain.llms.base import LLM
+from typing import Optional, List, Any
+from pydantic import BaseModel, Field
+
+from sentence_transformers import SentenceTransformer
+import numpy as np
+
+import time
+from transformers import AutoTokenizer
+
+import pandas as pd
 
 
-def process_query(user_query,driver):
+
+def process_query_for_baseline(user_query,driver):
     # Step 1: Preprocessing
     intent_confidence = classify_intent(user_query)
     intent = intent_confidence['intent']
@@ -37,13 +55,13 @@ def process_query(user_query,driver):
         context.append(graph_retrieval.get_hotel_info(params['hotel_name']))
     elif intent == "review_query": # Query: Show me reviews for The Azure Tower
         context.append(graph_retrieval.get_hotel_reviews(params['hotel_name']))
-        # context.append(graph_retrieval.get_hotel_review_count(params['hotel_name']))
-        # context.append(graph_retrieval.get_latest_hotel_reviews(params['hotel_name']))
-        # context.append(graph_retrieval.get_hotels_with_most_reviews())
-        # context.append(graph_retrieval.get_hotel_reviews_by_travelers_from_country(params['hotel_name'], params['country']))
-        # context.append(graph_retrieval.get_hotels_reviewed_by_travellers_from_country(params['country']))
-        # context.append(graph_retrieval.get_hotels_reviewed_by_travellers_from_city(params['city']))
-        # context.append(graph_retrieval.get_hotel_reviews_filtered(params['hotel_name'], params.get('gender'),params.get('age_group'),params.get('traveller_type')))
+        context.append(graph_retrieval.get_hotel_review_count(params['hotel_name']))
+        context.append(graph_retrieval.get_latest_hotel_reviews(params['hotel_name']))
+        context.append(graph_retrieval.get_hotels_with_most_reviews())
+        context.append(graph_retrieval.get_hotel_reviews_by_travelers_from_country(params['hotel_name'], params['country']))
+        context.append(graph_retrieval.get_hotels_reviewed_by_travellers_from_country(params['country']))
+        context.append(graph_retrieval.get_hotels_reviewed_by_travellers_from_city(params['city']))
+        context.append(graph_retrieval.get_hotel_reviews_filtered(params['hotel_name'], params.get('gender'),params.get('age_group'),params.get('traveller_type')))
     elif intent == "comparison": # Query: Compare the following hotels: The Azure Tower and L'Étoile Palace
         context.append(graph_retrieval.compare_two_hotels(params['hotel_name'], params['hotel_name_2']))
     elif intent == "traveller_preference": # Query: Best hotels for business travelers
@@ -71,28 +89,44 @@ def process_query(user_query,driver):
 
     return context
 
-if __name__ == "__main__":
+# def create_Gemma_llm():
+#
+# def create_Mistral_llm():
+#
+# def create_LLama_llm():
+
+def call_llm(query):
     db_manager = DBManager()
 
-
-    query = "Show me reviews for The Azure Tower"
-    context = process_query(query, db_manager.driver)
+    # 1) get baseline
+    context = process_query_for_baseline(query, db_manager.driver)
     print(context)
 
     Persona = "You are a knowledgeable and friendly hotel recommender assistant and your name is Jarvis."
     Task = f'''
-        {Persona} Start any reply with Sir. 
-        
-        Your goal is given the user's query, help users choose hotels that best match their intents like 
-        location preferences, comfort needs and so on. 
-        
-        Compare multiple hotel options objectively, highlight trade-offs, and provide concise, practical recommendations. 
-        
-        You avoid exaggeration, do not invent hotel details, and prioritize user preferences over generic popularity.
-        
-        User's query: {query}
-        
-        Use the following data (that was retrieved based on the query) as context/baseline information to help with the recommendations: {context}
-        '''
+            {Persona} Start any reply with Sir. 
 
-    #retriever = DualEmbeddingRetriever(db_manager.driver)
+            Your goal is given the user's query, help users choose hotels that best match their intents like 
+            location preferences, comfort needs and so on. 
+
+            Compare multiple hotel options objectively, highlight trade-offs, and provide concise, practical recommendations. 
+
+            You avoid exaggeration, do not invent hotel details, and prioritize user preferences over generic popularity.
+
+            User's query: {query}
+
+            Use the following data (that was retrieved based on the query) as context/baseline information to help with the recommendations: {context}
+            '''
+
+    # 2) Call embeddings and get output
+
+    # retriever = DualEmbeddingRetriever(db_manager.driver)
+
+
+if __name__ == "__main__":
+
+    query = "Show me reviews for The Azure Tower from people from Paris"
+    call_llm(query)
+
+
+

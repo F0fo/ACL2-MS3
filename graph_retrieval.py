@@ -131,12 +131,12 @@ class GraphRetriever:
         query = """
         MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)
         RETURN r.text AS review, r.score_overall AS rating
-        SKIP $randomOffset
         ORDER BY r.score_overall DESC
+        SKIP $randomOffset
         LIMIT 10
         """
         with self.driver.session() as session:
-            return session.run(query, hotel_name=hotel_name).data()    
+            return session.run(query, hotel_name=hotel_name, randomOffset=randomOffset).data()
 
     #13. Get hotel review count
     def get_hotel_review_count(self, hotel_name):
@@ -187,7 +187,7 @@ class GraphRetriever:
         RETURN co.name AS country
         """
         with self.driver.session() as session:
-            return session.run(query, traveller_country=from_country).data()
+            return session.run(query, from_country=from_country).data()
         
     #18. Get countries where a traveller from a specific country does not need a visa
     def get_countries_not_requiring_visa(self, from_country):
@@ -198,7 +198,7 @@ class GraphRetriever:
         RETURN co.name AS country
         """
         with self.driver.session() as session:
-            return session.run(query, traveller_country=from_country).data()
+            return session.run(query, from_country=from_country).data()
 
 
     # ------------------ case edging queries ------------------    
@@ -214,7 +214,7 @@ class GraphRetriever:
     #20. get hotels reviewed by travellers from a specific city
     def get_hotels_reviewed_by_travellers_from_city(self, city):
         query = """
-        MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)-[:FROM_CITY]->(ci:City {name: $city})
+        MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)-[:FROM_COUNTRY]->(c:Country)<-[:LOCATED_IN]-(ci:City {name: "Rome"})
         RETURN DISTINCT h.name AS hotel
         """
         with self.driver.session() as session:
@@ -229,7 +229,7 @@ class GraphRetriever:
         RETURN DISTINCT h.name AS hotel
         """
         with self.driver.session() as session:
-            return session.run(query, traveller_country=from_country).data()
+            return session.run(query, from_country=from_country).data()
         
     #23. get average hotel rating by travellers from a specific country
     def get_average_hotel_rating_by_travellers_from_country(self, hotel_name, country):
@@ -245,8 +245,8 @@ class GraphRetriever:
         query = """
         MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)
         WHERE ($gender IS NULL OR t.gender = $gender)
-        AND ($age_group IS NULL OR t.age_group = $age_group)
-        AND ($traveller_type IS NULL OR t.traveller_type = $traveller_type)
+        AND ($age_group IS NULL OR t.age = $age_group)
+        AND ($traveller_type IS NULL OR t.type = $traveller_type)
         RETURN r.text AS review, r.score_overall AS rating
         ORDER BY r.score_overall DESC
         LIMIT 10
@@ -258,7 +258,7 @@ class GraphRetriever:
     def get_best_hotels_for_traveller_type(self, traveller_type):
         query = """
         MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)
-        WHERE t.traveller_type = $traveller_type
+        WHERE t.type = $traveller_type
         RETURN h.name AS hotel, AVG(r.score_overall) AS score
         ORDER BY score DESC
         LIMIT 10
@@ -281,7 +281,7 @@ class GraphRetriever:
     #27. get best hotels for specific age group of travellers
     def get_best_hotels_for_age_group(self, age_group):
         query = """
-        MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller {age_group: $age_group}) 
+        MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller {age: $age_group}) 
         RETURN h.name AS hotel, AVG(r.score_overall) AS avg_rating
         ORDER BY avg_rating DESC
         LIMIT 10
@@ -305,9 +305,9 @@ class GraphRetriever:
     def get_hotels_by_cleanliness_base(self, min_cleanliness_base):
         query = """
         MATCH (h:Hotel)
-        WHERE h.cleanliness_rating >= $min_cleanliness_base
+        WHERE h.cleanliness_base >= $min_cleanliness_base
         RETURN h.name AS hotel, h.cleanliness_base AS cleanliness_base
-        ORDER BY h.cleanliness_rating DESC
+        ORDER BY h.cleanliness_base DESC
         """
         with self.driver.session() as session:
             return session.run(query, min_cleanliness_base=min_cleanliness_base).data()
@@ -315,9 +315,9 @@ class GraphRetriever:
     def get_hotels_by_comfort_base(self, min_comfort_base):
         query = """
         MATCH (h:Hotel)
-        WHERE h.comfort_rating >= $min_comfort_base
+        WHERE h.comfort_base >= $min_comfort_base
         RETURN h.name AS hotel, h.comfort_base AS comfort_base
-        ORDER BY h.comfort_rating DESC
+        ORDER BY h.comfort_base DESC
         """
         with self.driver.session() as session:
             return session.run(query, min_comfort_base=min_comfort_base).data()
@@ -325,9 +325,9 @@ class GraphRetriever:
     def get_hotels_by_facilities_base(self, min_facilities_base):
         query = """
         MATCH (h:Hotel)
-        WHERE h.facilities_rating >= $min_facilities_base
+        WHERE h.facilities_base >= $min_facilities_base
         RETURN h.name AS hotel, h.facilities_base AS facilities_base
-        ORDER BY h.facilities_rating DESC
+        ORDER BY h.facilities_base DESC
         """
         with self.driver.session() as session:
             return session.run(query, min_facilities_base=min_facilities_base).data()
