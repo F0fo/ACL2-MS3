@@ -46,7 +46,7 @@ class GraphRetriever:
     def get_cities_With_Hotels(self):
         query = """
         MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)
-        RETURN DISTINCT c.name AS city
+        RETURN DISTINCT c.name AS city, h.name as hotel
         """
         with self.driver.session() as session:
             return session.run(query).data()
@@ -55,7 +55,7 @@ class GraphRetriever:
     def get_countries_With_Hotels(self):
         query = """
         MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
-        RETURN DISTINCT co.name AS country
+        RETURN DISTINCT co.name AS country, h.name as hotel
         """
         with self.driver.session() as session:
             return session.run(query).data()
@@ -130,9 +130,9 @@ class GraphRetriever:
         randomOffset = np.random.randint(0,50)
         query = """
         MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)
-        RETURN r.content AS review, r.rating AS rating
+        RETURN r.text AS review, r.score_overall AS rating
         SKIP $randomOffset
-        ORDER BY r.rating DESC
+        ORDER BY r.score_overall DESC
         LIMIT 10
         """
         with self.driver.session() as session:
@@ -151,7 +151,7 @@ class GraphRetriever:
     def get_latest_hotel_reviews(self, hotel_name, limit=5):
         query = """
         MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)
-        RETURN r.content AS review, r.rating AS rating, r.date AS date
+        RETURN r.text AS review, r.score_overall AS rating, r.date AS date
         ORDER BY r.date DESC
         LIMIT $limit
         """
@@ -162,8 +162,8 @@ class GraphRetriever:
     def get_hotel_reviews_by_travelers_from_country(self, hotel_name, country):
         query = """
         MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)-[:FROM_COUNTRY]->(co:Country {name: $country})
-        RETURN r.content AS review, r.rating AS rating
-        ORDER BY r.rating DESC
+        RETURN r.text AS review, r.score_overall AS rating
+        ORDER BY r.score_overall DESC
         LIMIT 10
         """
         with self.driver.session() as session:
@@ -235,7 +235,7 @@ class GraphRetriever:
     def get_average_hotel_rating_by_travellers_from_country(self, hotel_name, country):
         query = """
         MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)-[:FROM_COUNTRY]->(co:Country {name: $country})
-        RETURN AVG(r.rating) AS average_rating
+        RETURN AVG(r.score_overall) AS average_rating
         """
         with self.driver.session() as session:
             return session.run(query, hotel_name=hotel_name, country=country).data()
@@ -247,8 +247,8 @@ class GraphRetriever:
         WHERE ($gender IS NULL OR t.gender = $gender)
         AND ($age_group IS NULL OR t.age_group = $age_group)
         AND ($traveller_type IS NULL OR t.traveller_type = $traveller_type)
-        RETURN r.content AS review, r.rating AS rating
-        ORDER BY r.rating DESC
+        RETURN r.text AS review, r.score_overall AS rating
+        ORDER BY r.score_overall DESC
         LIMIT 10
         """
         with self.driver.session() as session:
@@ -259,7 +259,7 @@ class GraphRetriever:
         query = """
         MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)
         WHERE t.traveller_type = $traveller_type
-        RETURN h.name AS hotel, AVG(r.rating) AS score
+        RETURN h.name AS hotel, AVG(r.score_overall) AS score
         ORDER BY score DESC
         LIMIT 10
         """
@@ -271,7 +271,7 @@ class GraphRetriever:
     def get_best_hotels_for_gender(self, gender):
         query = """
         MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller {gender: $gender}) 
-        RETURN h.name AS hotel, AVG(r.rating) AS avg_rating
+        RETURN h.name AS hotel, AVG(r.score_overall) AS avg_rating
         ORDER BY avg_rating DESC
         LIMIT 10
         """
@@ -282,7 +282,7 @@ class GraphRetriever:
     def get_best_hotels_for_age_group(self, age_group):
         query = """
         MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller {age_group: $age_group}) 
-        RETURN h.name AS hotel, AVG(r.rating) AS avg_rating
+        RETURN h.name AS hotel, AVG(r.score_overall) AS avg_rating
         ORDER BY avg_rating DESC
         LIMIT 10
         """
