@@ -5,12 +5,11 @@ from entity_extractor import extract_entities
 from entity_extractor import get_cypher_params
 from graph_retrieval import GraphRetriever
 from db_manager import DBManager
+from embeddings import DualEmbeddingRetriever #search_by_query
 
 
 
-
-
-def process_query(user_query):
+def process_query(user_query,driver):
     # Step 1: Preprocessing
     intent_confidence = classify_intent(user_query)
     intent = intent_confidence['intent']
@@ -21,8 +20,8 @@ def process_query(user_query):
     params = get_cypher_params(entities)
     print(params)
 
-    db_manager = DBManager()
-    graph_retrieval = GraphRetriever(db_manager.driver)
+
+    graph_retrieval = GraphRetriever(driver)
 
     context = []
     # hotel_name,hotel_name_2, city, country, traveller_type, gender, age_group, rating, cleanliness_base, comfort_base, facilities_base
@@ -34,9 +33,6 @@ def process_query(user_query):
         context.append(graph_retrieval.get_hotels_by_rating())
         context.append(graph_retrieval.get_hotels_in_city_by_rating(params['city']))
         context.append(graph_retrieval.get_hotels_in_country_by_rating(params['country']))
-        #context.append(graph_retrieval.get_hotels_by_cleanliness_base(params['cleanliness_base']))
-        #context.append(graph_retrieval.get_hotels_by_comfort_base(params['comfort_base']))
-        #context.append(graph_retrieval.get_hotels_by_facilities_base(params['facilities_base']))
     elif intent == "hotel_info": # Query: Tell me about The Azure Tower
         context.append(graph_retrieval.get_hotel_info(params['hotel_name']))
     elif intent == "review_query": # Query: Show me reviews for this hotel
@@ -67,14 +63,19 @@ def process_query(user_query):
         context.append(graph_retrieval.get_hotels_with_no_visa_requirements())
     elif intent == "rating_filter": # Query: Hotels with cleanliness rating above 9
         context.append(graph_retrieval.get_average_hotel_rating_by_travellers_from_country(params['hotel_name'],params['country']))
+        # context.append(graph_retrieval.get_hotels_by_cleanliness_base(params['cleanliness_base']))
+        # context.append(graph_retrieval.get_hotels_by_comfort_base(params['comfort_base']))
+        # context.append(graph_retrieval.get_hotels_by_facilities_base(params['facilities_base']))
     elif intent == "general_question": # Query: How many hotels do you have?
         context.append(graph_retrieval.get_all_hotels())
 
     return context
 
 if __name__ == "__main__":
+    db_manager = DBManager()
+
     query = "Recommend me a good hotel in Tokyo Japan"
-    context = process_query(query)
+    context = process_query(query, db_manager.driver)
     print(context)
 
     Persona = "You are a knowledgeable and friendly hotel recommender assistant and your name is Jarvis."
@@ -93,3 +94,4 @@ if __name__ == "__main__":
         Use the following data (that was retrieved based on the query) as context/baseline information to help with the recommendations: {context}
         '''
 
+    #retriever = DualEmbeddingRetriever(db_manager.driver)
