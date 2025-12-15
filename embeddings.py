@@ -184,12 +184,16 @@ class DualEmbeddingRetriever:
             print(f"  No {label} with both embeddings found")
             return False
         
-        print(f"  Found {len(records)} hotels with both embeddings")
+        print(f"  Found {len(records)} {label}with both embeddings")
         
         # Prepare embedding matrices
         node2vec_list = []
         text_list = []
         
+        # Initialize mappings
+        self.node_id_to_idx[label] = {}  
+        self.idx_to_node_id[label] = {}  
+
         for idx, record in enumerate(records):
             node_id = record['node_id']
             
@@ -352,18 +356,21 @@ class DualEmbeddingRetriever:
     def generate_text_embeddings(self, label, batch_size=32):
         """
         Generate text embeddings for all nodes of a given label
+        Automatically combines relevant text properties
         """
-        print(f"\n Generating text embeddings for label: '{label}'")
-
+        print(f"\n Generating text embeddings for {label} nodes...")
+        
+        # Get text properties
         text_props = self.get_text_properties(label)
         primary_key = self.get_primary_key(label)
-
-        if not text_props or not primary_key:
-            print(f" Cannot determine text properties or primary key for label '{label}'")
-            return
-        print(f" Using text properties: {text_props}")
-        print(f" Using primary key: {primary_key}")
-
+        
+        if not text_props:
+            print(f"  No text properties found for {label}")
+            return False
+        
+        print(f" Using properties: {text_props}")
+        print(f" Primary key: {primary_key}")
+        
         # Fetch nodes
         props_str = ', '.join([f'n.{prop}' for prop in text_props])
         query = f"""
@@ -371,67 +378,136 @@ class DualEmbeddingRetriever:
         RETURN n.{primary_key} as node_id, {props_str}
         ORDER BY node_id
         """
-
+        
         with self.driver.session() as session:
             result = session.run(query)
             records = result.data()
+        
         if not records:
-            print(f" No nodes found for label '{label}'")
+            print(f"No {label} nodes found")
             return False
-        print(f" Processing {len(records)} nodes...")
-
+        
+        print(f"Processing {len(records)} {label} nodes...")
+        
         embeddings_to_save = []
-
+        
+        #using batching to prevent memory issues [reiews runs out of memory ]   
         for i in range(0, len(records), batch_size):
             batch = records[i:i+batch_size]
-
+            
             # Create text representations
             node_texts = []
             node_ids = []
-
+            
             for record in batch:
                 node_id = record['node_id']
+                
+                # Combine all text properties
                 text_parts = []
-
                 for prop in text_props:
                     value = record.get(prop)
                     if value:
-                        text_parts.append(f"{prop}: {str(value)[:200]}")  # Limit length
-
+                        # Clean and add property
+                        text_parts.append(f"{prop}: {value}")
+                
+                if not text_parts:
+                    text_parts.append(f"{label} node")
+                
                 combined_text = ". ".join(text_parts)
-
+                
                 node_texts.append(combined_text)
                 node_ids.append(node_id)
-
-            # Generate embeddings for batch
+            
+            # Generate embeddings
             batch_embeddings = self.text_model.encode(
                 node_texts,
                 show_progress_bar=False,
                 batch_size=batch_size
             )
-
+            
             # Prepare for Neo4j
             for node_id, embedding in zip(node_ids, batch_embeddings):
                 embeddings_to_save.append({
                     'node_id': node_id,
                     'embedding': embedding.tolist()
                 })
-
+            
             if (i // batch_size + 1) % 10 == 0:
                 print(f"    Processed {i + len(batch)}/{len(records)}...")
-        # Save to Neo4j
-        print(f"  Saving text embeddings to Neo4j for label '{label}'...")
-
-        with self.driver.session() as session:
-            session.run(f"""
-                UNWIND $embeddings as emb
-                MATCH (n:{label} {{{primary_key}: emb.node_id}})
-                SET n.{self.TEXT_EMBEDDING_PROP} = emb.embedding
-            """, embeddings=embeddings_to_save)
-
-        print(f"  ✓ Text embeddings created for {len(embeddings_to_save)} nodes of label '{label}'")
-        return True
-
+        
+        # Save to Neo4j in batches (important for large datasets!)
+        print(f"   Saving {len(embeddings_to_save)} text embeddings to Neo4j for label '{label}'...")
+        print(f"   Primary key: {primary_key}")
+        print(f"   Batch size: 1000")
+        
+        save_batch_size = 1000  # Save 1000 at a time to speed up
+        total_saved = 0
+        failed_batches = 0
+        
+        for i in range(0, len(embeddings_to_save), save_batch_size):
+            batch = embeddings_to_save[i:i+save_batch_size]
+            
+            try:
+                with self.driver.session() as session:
+                    result = session.run(f"""
+                        UNWIND $embeddings as emb
+                        MATCH (n:{label} {{{primary_key}: emb.node_id}})
+                        SET n.{self.TEXT_EMBEDDING_PROP} = emb.embedding
+                        RETURN count(n) as updated
+                    """, embeddings=batch)
+                    updated = result.single()['updated']
+                    total_saved += updated
+                    
+                    if updated < len(batch):
+                        print(f"       Batch {i//save_batch_size}: Only {updated}/{len(batch)} matched!")
+            except Exception as e:
+                print(f"      Batch {i//save_batch_size} failed: {e}")
+                failed_batches += 1
+                continue
+            
+            if (i // save_batch_size + 1) % 10 == 0:
+                print(f"     Progress: {total_saved}/{len(embeddings_to_save)} saved...")
+        
+        print(f"  ✓ Completed: {total_saved}/{len(embeddings_to_save)} saved, {failed_batches} batches failed")
+        
+        # VERIFY embeddings were actually saved
+        print(f"   Verifying embeddings in database...")
+        try:
+            with self.driver.session() as session:
+                verify = session.run(f"""
+                    MATCH (n:{label})
+                    WHERE n.{self.TEXT_EMBEDDING_PROP} IS NOT NULL
+                    RETURN count(n) as count
+                """)
+                actual_count = verify.single()['count']
+            
+            print(f"   Verification result: {actual_count} nodes with embeddings")
+            
+            if actual_count == 0:
+                print(f"   WARNING: No embeddings found in database after save!")
+                print(f"   Saved {total_saved} but found {actual_count}")
+                print(f"   This suggests a primary key mismatch or transaction issue")
+                
+                # Debug: Show sample node
+                with self.driver.session() as session:
+                    sample = session.run(f"""
+                        MATCH (n:{label})
+                        RETURN n.{primary_key} as key LIMIT 1
+                    """)
+                    sample_record = sample.single()
+                    if sample_record:
+                        print(f"   Sample {label} node has {primary_key} = {sample_record['key']}")
+                
+                return False
+            elif actual_count < total_saved:
+                print(f"    Only {actual_count}/{total_saved} embeddings verified")
+                return True  # Still continue, partial success
+            else:
+                print(f"   Success: All {actual_count} embeddings verified in database")
+                return True
+        except Exception as e:
+            print(f"   Verification failed: {e}")
+            return False
         
     
     # ==================== SEARCH METHODS ====================
@@ -627,6 +703,8 @@ class DualEmbeddingRetriever:
                 
             except Exception as e:
                 print(f"  Error processing {label}: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
         
         print("\n" + "="*70)
