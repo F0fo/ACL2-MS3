@@ -3,8 +3,12 @@ import numpy as np
 
 
 class GraphRetriever:
-    def __init__(self, uri, user, password):
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))
+    # def __init__(self, uri, user, password):
+    #     self.driver = GraphDatabase.driver(uri, auth=(user, password))
+
+    def __init__(self, driver):
+        """Initialize with Neo4j driver"""
+        self.driver = driver
 
     def close(self):
         self.driver.close()
@@ -23,7 +27,7 @@ class GraphRetriever:
     #2. Get hotels based on country    
     def get_hotels_in_country(self, country):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:IN_COUNTRY]->(co:Country {name: $country})
+        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country {name: $country})
         RETURN h.name AS hotel, h.star_rating AS rating
         """
         with self.driver.session() as session:
@@ -32,7 +36,7 @@ class GraphRetriever:
     #3. Get cities in a country    
     def get_cities_in_country(self, country):
         query = """
-        MATCH (c:City)-[:IN_COUNTRY]->(co:Country {name: $country})
+        MATCH (c:City)-[:LOCATED_IN]->(co:Country {name: $country})
         RETURN c.name AS city
         """
         with self.driver.session() as session:
@@ -50,14 +54,14 @@ class GraphRetriever:
     #5. Get countries with hotels    
     def get_countries_With_Hotels(self):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:IN_COUNTRY]->(co:Country)
+        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
         RETURN DISTINCT co.name AS country
         """
         with self.driver.session() as session:
             return session.run(query).data()
            
     #6. Get hotels by minimum star rating
-    def get_hotels_by_rating(self, min_rating):
+    def get_hotels_by_rating(self, min_rating=5):
         query = """
         MATCH (h:Hotel)
         WHERE h.star_rating >= $min_rating
@@ -68,7 +72,7 @@ class GraphRetriever:
             return session.run(query, min_rating=min_rating).data()
 
     #7. Get hotels in a city with minimum star rating    
-    def get_hotels_in_city_by_rating(self, city, min_rating):
+    def get_hotels_in_city_by_rating(self, city, min_rating=5):
         query = """
         MATCH (h:Hotel)-[:LOCATED_IN]->(c:City {name: $city})
         WHERE h.star_rating >= $min_rating
@@ -79,9 +83,9 @@ class GraphRetriever:
             return session.run(query, city=city, min_rating=min_rating).data()
 
     #8. Get hotels in a country with minimum star rating
-    def get_hotels_in_country_by_rating(self, country, min_rating):
+    def get_hotels_in_country_by_rating(self, country, min_rating=5):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:IN_COUNTRY]->(co:Country {name: $country})
+        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country {name: $country})
         WHERE h.star_rating >= $min_rating
         RETURN h.name AS hotel, h.star_rating AS rating
         ORDER BY h.star_rating DESC
@@ -89,11 +93,11 @@ class GraphRetriever:
         with self.driver.session() as session:
             return session.run(query, country=country, min_rating=min_rating).data()    
 
-    #9. Get specific hotel rating    
-    def get_hotel_rating(self, hotel_name):
+    #9. Get specific hotel
+    def get_hotel_info(self, hotel_name):
         query = """
-        MATCH (h:Hotel {name: $hotel_name})
-        RETURN h.name AS hotel, h.star_rating AS rating
+        MATCH (h:Hotel {name: $hotel_name})-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country )
+        RETURN h.name AS hotel, h.star_rating AS rating, h.cleanliness_base AS cleanliness_base, h.comfort_base AS comfort_base, h.facilities_base AS facilities_base, c.name AS city, co.name AS country
         """
         with self.driver.session() as session:
             return session.run(query, hotel_name=hotel_name).data()
@@ -113,7 +117,7 @@ class GraphRetriever:
     #11. Get top rated hotels in a country    
     def get_top_rated_hotels_in_country(self, country, top_n=5):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:IN_COUNTRY]->(co:Country {name: $country})
+        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country {name: $country})
         RETURN h.name AS hotel, h.star_rating AS rating
         ORDER BY h.star_rating DESC
         LIMIT $top_n
@@ -220,7 +224,7 @@ class GraphRetriever:
     def get_hotels_accessible_without_visa(self, from_country):
         query = """
         MATCH (t:Traveller)-[:FROM_COUNTRY]->(tc:Country {name: $from_country})
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:IN_COUNTRY]->(co:Country)
+        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
         WHERE NOT (tc)-[:NEEDS_VISA]->(co)
         RETURN DISTINCT h.name AS hotel
         """
@@ -288,7 +292,7 @@ class GraphRetriever:
     #28. hotels with no visa requirements
     def get_hotels_with_no_visa_requirements(self):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:IN_COUNTRY]->(co:Country)
+        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
         WHERE NOT EXISTS {
             MATCH (t:Traveller)-[:FROM_COUNTRY]->(tc:Country)-[:NEEDS_VISA]->(co)
         }
@@ -337,4 +341,12 @@ class GraphRetriever:
         """
         with self.driver.session() as session:
             return session.run(query, hotel1=hotel_name, hotel2=hotel_name_2).data()
-        
+
+    # 31. Get all hotels
+    def get_all_hotels(self):
+        query = """
+        MATCH (h:Hotel)
+        RETURN h.name AS hotel
+        """
+        with self.driver.session() as session:
+            return session.run(query).data()

@@ -1,7 +1,8 @@
 import spacy
 import pandas as pd
+import re
 
-# do python -m spacy download en_core_web_sm
+# run in terminal: python -m spacy download en_core_web_sm
 nlp = spacy.load("en_core_web_sm")
 
 # Load domain data
@@ -24,7 +25,10 @@ def extract_entities(text):
         "cities": [],
         "countries": [],
         "traveller_types": [],
-        "demographics": []
+        "demographics": [],
+        "cleanliness_base": None,
+        "comfort_base": None,
+        "facilities_base": None
     }
 
     # Use spaCy NER to extract entities
@@ -82,6 +86,39 @@ def extract_entities(text):
             if "Male" not in entities["demographics"]:
                 entities["demographics"].append("Male")
 
+    # Extract rating criteria (cleanliness, comfort, facilities)
+    text_lower = text.lower()
+
+    # Keywords for each category
+    cleanliness_keywords = ["cleanliness", "clean", "hygiene", "hygienic", "tidy", "spotless"]
+    comfort_keywords = ["comfort", "comfortable", "cozy", "cosy", "relaxing"]
+    facilities_keywords = ["facilities", "amenities", "services", "features", "equipment"]
+
+    # Extract numeric rating values from text
+    numbers = re.findall(r'\b(\d+(?:\.\d+)?)\b', text)
+    rating_value = None
+    for num in numbers:
+        val = float(num)
+        if 1 <= val <= 10:  # Rating scale is typically 1-10
+            rating_value = val
+            break
+
+    # Check for each category and assign rating
+    for keyword in cleanliness_keywords:
+        if keyword in text_lower:
+            entities["cleanliness_base"] = rating_value if rating_value else 7.0  # Default threshold
+            break
+
+    for keyword in comfort_keywords:
+        if keyword in text_lower:
+            entities["comfort_base"] = rating_value if rating_value else 7.0
+            break
+
+    for keyword in facilities_keywords:
+        if keyword in text_lower:
+            entities["facilities_base"] = rating_value if rating_value else 7.0
+            break
+
     return entities
 
 
@@ -93,26 +130,45 @@ def get_cypher_params(entities):
         params["hotel_name"] = entities["hotels"][0]
         if len(entities["hotels"]) > 1:
             params["hotel_name_2"] = entities["hotels"][1]
+        else:
+            params["hotel_name_2"] = ""
+    else:
+        params["hotel_name"] = ""
+        params["hotel_name_2"] = ""
 
     if entities["cities"]:
         params["city"] = entities["cities"][0]
+    else:
+        params["city"] = ""
 
     if entities["countries"]:
         params["country"] = entities["countries"][0]
-        if len(entities["countries"]) > 1:
-            params["from_country"] = entities["countries"][0]
-            params["to_country"] = entities["countries"][1]
+    else:
+        params["country"] = ""
+
 
     if entities["traveller_types"]:
         params["traveller_type"] = entities["traveller_types"][0]
+    else:
+        params["traveller_type"] = ""
 
 
     if entities["demographics"]:
         for d in entities["demographics"]:
             if d in ["Male", "Female"]:
                 params["gender"] = d
+                params["age_group"] = ""
             else:
                 params["age_group"] = d
+                params["gender"] = ""
+    else:
+        params["gender"] = ""
+        params["age_group"] = ""
+
+    # Rating criteria parameters
+    params["cleanliness_base"] = entities.get("cleanliness_base")
+    params["comfort_base"] = entities.get("comfort_base")
+    params["facilities_base"] = entities.get("facilities_base")
 
     return params
 
@@ -125,6 +181,10 @@ if __name__ == "__main__":
         "Show me reviews for The Azure Tower",
         "Best hotels for solo female travelers",
         "Hotels for travelers aged 25-34",
+        "Hotels with cleanliness rating above 9",
+        "Find comfortable hotels in Tokyo",
+        "Hotels with good facilities and amenities",
+        "Clean hotels with comfort rating 8",
     ]
 
     for query in test_queries:
