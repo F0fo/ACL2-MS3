@@ -1,2 +1,7 @@
 intent_model_final/
 __pycache__/
+intent_model_final/
+.env
+.claude/
+__pycache__/
+.pdf
