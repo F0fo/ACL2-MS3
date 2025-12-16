@@ -1,0 +1,78 @@
+model,latency_sec,input_tokens,output_tokens,total_tokens,input_cost_usd,output_cost_usd,total_cost_usd,semantic_accuracy,response
+Gemma-2-2B,3.694,11,504,515,1e-06,0.000101,0.000102,0.531,"Milestone 1 of the project report should include:
+
+* **Data Cleaning:**  A description of the data cleaning process, including any transformations or preprocessing steps performed.  Include plots or visualizations to show the impact of the cleaning on the data distribution.
+* **Data Analysis:**  A summary of the key findings from the data analysis, including any insights or patterns discovered.  
+* **Feature Engineering:**  A description of the feature engineering process, including the rationale behind the chosen features and any transformations applied.  Include plots or visualizations to show the impact of the engineering on the data.
+* **Model Selection:**  A description of the model selection process, including the rationale behind the chosen model and any comparisons to other models.  Include plots or visualizations to show the performance of the model.
+* **Model Evaluation:**  A summary of the model evaluation results, including metrics such as accuracy, precision, recall, F1-score, etc.  
+* **Evaluation Metrics:**  A description of the evaluation metrics used, and how they were chosen.
+* **Inference Function:**  A description of the inference function, including any explanations or justifications for its choice.
+* **XAI:**  A description of any Explainable AI techniques used, including any visualizations or explanations provided.
+* **Global and Local Explanations:**  A description of the global and local explanations provided, and how they were generated.
+* **Limitations:**  A discussion of any limitations of the model or the chosen approach.
+* **Comparison of Approaches:**  A comparison of the performance of different approaches, including the rationale behind the chosen approach. 
+* **Documentation:**  Clear and concise documentation of the entire process, including the rationale behind each step and the results of each step.
+
+
+**Important Notes:**
+
+* **Visualizations:**  Include relevant visualizations to support your explanations and demonstrate the impact of your choices.
+* **Metrics:**  Clearly define and explain the metrics used for evaluation.
+* **Justification:**  Provide clear justifications for each step and the choices made.
+* **Comparison:**  Compare different approaches and explain the rationale behind your selection.
+* **Limitations:**  Acknowledge any limitations of the model or the chosen approach. 
+
+
+This comprehensive approach will help you create a strong and informative Milestone 1 report. 
+"
+Mistral-7B,11.23,11,262,273,2e-06,0.000157,0.000159,0.665," For Milestone 1 of the project report, the following components should be included:
+
+1. Description of the actual deliverables and requirements.
+2. Data cleaning:
+   - Explanation of the steps taken.
+   - Plotting the results.
+   - Answering data engineering questions.
+   - Reporting evidence.
+3. Feature selection:
+   - Reason for chosen features.
+   - Plotting the effect of features.
+4. Data pre-processing and feature engineering:
+   - Understanding the step.
+   - Need for the step.
+   - Effect on the step on the data distribution.
+5. Performance reporting:
+   - Log transformation reasoning.
+   - Reporting the model choice and how it works.
+   - Reporting its limitations and performance throughout training and validation.
+6. Evaluation:
+   - Preparation for every team member.
+   - Correct order and documentation.
+   - All plots and data engineering answers included.
+7. Limitations reporting:
+   - Reporting its performance on the unseen test data.
+   - Plotting the reports.
+8. Inference function:
+   - Global and local explanations.
+   - Plotting and explaining the explanations in the report.
+
+It's important to note that for each step, you must justify why it makes sense for your dataset and task, and provide evidence to support your explanation. Additionally, you should compare multiple approaches and report comparative results, as well as include a baseline requirement for architecture choices in the notebook."
+LLaMA-3.1-8B,5.212,11,393,404,3e-06,0.000314,0.000318,0.568,"Based on the provided context, the following should be included in the report for Milestone 1:
+
+1. **Data Cleaning**: Explain and justify every step in the context of your project, including the need for each step and its effect on the data distribution, range, values, etc.
+2. **Data Analysis**: Include plots and results from data analysis questions, along with the reasoning and justification for the chosen features.
+3. **Feature Selection**: Report the reason for the chosen features, along with evidence and plots showing the effect of the features.
+4. **Data Pre-processing and Feature Engineering**: Explain the need for each step, its effect on the data, and report the results of the pre-processing and feature engineering steps.
+5. **Prediction Model**: Report the model choice, how it works, its limitations, and its performance throughout training and validation.
+6. **Inference Function**: Include plots and explanations of the inference function, along with global and local explanations.
+7. **XAI (Explainable AI)**: Report the results of XAI, including global and local explanations, and plots explaining the explanations.
+8. **Limitations**: Report the limitations of the chosen approach and the performance of the model on unseen test data.
+9. **Comparative Results**: Compare multiple approaches to improve performance, including different features, preprocessing pipelines, models, hyperparameters, etc.
+10. **Baseline Requirement**: Include a baseline requirement for architecture choices, such as a clear baseline (before the change) and after results for the complete pipeline.
+
+Additionally, the report should include:
+
+* Clear markdown explanations that justify choices
+* Correct order and documentation of steps
+* All plots and data engineering answers included
+* Evidence to support explanations, such as plots, numbers, statistics, or references to experiments."

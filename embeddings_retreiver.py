@@ -10,18 +10,24 @@ from db_manager import DBManager
 
 
 class EmbeddingRetriever:
-    
+
     # Configuration
     GRAPH_NAME = "travelGraph"
     EMBEDDING_PROP = "node2vecEmbedding"
+    EMBEDDING_DIM = 128
     VECTOR_INDEX = "hotel_node2vec_index"
 
     FAISS_INDEX_PATH = "faiss_hotel_index.bin"
     HOTEL_MAPPING_PATH = "hotel_mapping.pkl"
-    
-    
+
+
     def __init__(self, driver):
         self.driver = driver
+
+        # FAISS index and mappings (initialized when built or loaded)
+        self.faiss_index = None
+        self.hotel_id_to_idx = {}
+        self.idx_to_hotel_id = {}
          
     
     def create_graph(self):
@@ -155,29 +161,142 @@ class EmbeddingRetriever:
                     print(" All hotels have embeddings")
                 
                 return with_embeddings > 0
-                
+
             except Exception as e:
                 print(f" Error verifying embeddings: {e}")
                 return False
-    
+
+    def build_faiss_index(self):
+        """Build FAISS index from Node2Vec embeddings stored in Neo4j"""
+        print("\n Building FAISS index...")
+
+        query = f"""
+        MATCH (h:Hotel)
+        WHERE h.{self.EMBEDDING_PROP} IS NOT NULL
+        RETURN h.hotel_id as hotel_id, h.{self.EMBEDDING_PROP} as embedding
+        ORDER BY hotel_id
+        """
+
+        with self.driver.session() as session:
+            result = session.run(query)
+            records = result.data()
+
+        if not records:
+            print("  No hotels with embeddings found!")
+            return False
+
+        print(f"  Found {len(records)} hotels with embeddings")
+
+        # Build embedding matrix and mappings
+        embeddings_list = []
+        self.hotel_id_to_idx = {}
+        self.idx_to_hotel_id = {}
+
+        for idx, record in enumerate(records):
+            hotel_id = record['hotel_id']
+            embedding = np.array(record['embedding'], dtype='float32')
+
+            embeddings_list.append(embedding)
+            self.hotel_id_to_idx[hotel_id] = idx
+            self.idx_to_hotel_id[idx] = hotel_id
+
+        # Stack into matrix
+        embeddings_matrix = np.vstack(embeddings_list)
+        print(f"  Embeddings matrix shape: {embeddings_matrix.shape}")
+
+        # Normalize for cosine similarity
+        faiss.normalize_L2(embeddings_matrix)
+
+        # Create FAISS index (Inner Product = cosine similarity after normalization)
+        self.faiss_index = faiss.IndexFlatIP(self.EMBEDDING_DIM)
+        self.faiss_index.add(embeddings_matrix)
+
+        print(f"  FAISS index built with {self.faiss_index.ntotal} vectors")
+        return True
+
+    def save_faiss_index(self):
+        """Save FAISS index and mappings to disk"""
+        print("\n Saving FAISS index...")
+
+        if self.faiss_index is None:
+            print("  No FAISS index to save!")
+            return False
+
+        try:
+            # Save FAISS index
+            faiss.write_index(self.faiss_index, self.FAISS_INDEX_PATH)
+            print(f"  Index saved to {self.FAISS_INDEX_PATH}")
+
+            # Save mappings
+            with open(self.HOTEL_MAPPING_PATH, 'wb') as f:
+                pickle.dump({
+                    'hotel_id_to_idx': self.hotel_id_to_idx,
+                    'idx_to_hotel_id': self.idx_to_hotel_id
+                }, f)
+            print(f"  Mappings saved to {self.HOTEL_MAPPING_PATH}")
+
+            return True
+        except Exception as e:
+            print(f"  Error saving: {e}")
+            return False
+
+    def load_faiss_index(self):
+        """Load FAISS index and mappings from disk"""
+        print("\n Loading FAISS index...")
+
+        if not os.path.exists(self.FAISS_INDEX_PATH):
+            print(f"  Index file not found: {self.FAISS_INDEX_PATH}")
+            return False
+
+        if not os.path.exists(self.HOTEL_MAPPING_PATH):
+            print(f"  Mapping file not found: {self.HOTEL_MAPPING_PATH}")
+            return False
+
+        try:
+            # Load FAISS index
+            self.faiss_index = faiss.read_index(self.FAISS_INDEX_PATH)
+            print(f"  Index loaded ({self.faiss_index.ntotal} vectors)")
+
+            # Load mappings
+            with open(self.HOTEL_MAPPING_PATH, 'rb') as f:
+                mappings = pickle.load(f)
+            self.hotel_id_to_idx = mappings['hotel_id_to_idx']
+            self.idx_to_hotel_id = mappings['idx_to_hotel_id']
+            print(f"  Mappings loaded ({len(self.hotel_id_to_idx)} hotels)")
+
+            return True
+        except Exception as e:
+            print(f"  Error loading: {e}")
+            return False
+
     def find_similar_hotels(self, hotel_name, top_k=5):
+        """Find similar hotels using Node2Vec embeddings"""
+        print(f"\n Searching similar hotels to: '{hotel_name}'")
+
+        # Ensure FAISS index is loaded
+        if self.faiss_index is None:
+            print("  No FAISS index loaded. Attempting to load...")
+            if not self.load_faiss_index():
+                print("  Failed to load FAISS index. Run setup first.")
+                return []
+
         query = f"""
         MATCH (h:Hotel {{name: $hotel}})
-        ReTURN h.hotel_id AS hotel_id
+        RETURN h.hotel_id AS hotel_id
         """
-        
+
         with self.driver.session() as session:
             result = session.run(query, hotel=hotel_name)
             record = result.single()
 
             if not record:
-                print(f" Hotel '{hotel_name}' not found in database")
+                print(f"  Hotel '{hotel_name}' not found in database")
                 return []
             hotel_id = record['hotel_id']
 
-        #get position of retrieved hotel in faiss index    
+        # Get position of retrieved hotel in FAISS index
         if hotel_id not in self.hotel_id_to_idx:
-            print(f" Hotel '{hotel_name}' does not have an embedding")
+            print(f"  Hotel '{hotel_name}' does not have an embedding")
             return []
         
         idx = self.hotel_id_to_idx[hotel_id]
@@ -251,31 +370,40 @@ class EmbeddingRetriever:
             return None, None
     
     def setup_embeddings(self):
-        """Complete setup process: create graph, run node2vec, create index"""
+        """Complete setup process: create graph, run node2vec, build FAISS index"""
         print("\n" + "="*60)
         print("SETTING UP NODE2VEC EMBEDDINGS")
         print("="*60)
-        
+
         try:
             # Step 1: Create graph projection
             self.create_graph()
-            
+
             # Step 2: Run Node2Vec
             self.run_node2vec()
-            
+
             # Step 3: Verify embeddings
             if not self.verify_embeddings_exist():
                 print("\n Setup failed: No embeddings created")
                 return False
-            
-             # Step 4: Create vector index
+
+            # Step 4: Create Neo4j vector index (optional, for native Neo4j search)
             self.create_vector_index()
-            
+
+            # Step 5: Build FAISS index for fast similarity search
+            if not self.build_faiss_index():
+                print("\n Setup failed: Could not build FAISS index")
+                return False
+
+            # Step 6: Save FAISS index to disk
+            if not self.save_faiss_index():
+                print("\n Warning: Could not save FAISS index")
+
             print("\n" + "="*60)
             print(" EMBEDDING SETUP COMPLETE")
             print("="*60)
             return True
-            
+
         except Exception as e:
             print(f"\nSetup failed: {e}")
             return False

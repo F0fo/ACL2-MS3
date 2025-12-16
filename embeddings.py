@@ -53,22 +53,23 @@ class DualEmbeddingRetriever:
         self.text_model = SentenceTransformer('all-MiniLM-L6-v2')
         print("Model loaded")
 
-        #Create FAISS directory 
+        #Create FAISS directory
         os.makedirs(self.FAISS_DIR, exist_ok=True)
-    
-    def generate_text_embeddings(self, batch_size=32):
+
+    def generate_hotel_text_embeddings(self, batch_size=32):
         """
-        Generate text embeddings for all hotels
-        Combines hotel name + reviews into text representation
+        Generate text embeddings specifically for hotels.
+        Combines hotel name + star rating + reviews into text representation.
+        This method provides richer embeddings for hotels than the generic method.
         """
-        print("\n Generating text embeddings for hotels...")
-        
+        print("\n Generating text embeddings for hotels (with reviews)...")
+
         # Fetch hotels and their reviews
         query = """
         MATCH (h:Hotel)
         OPTIONAL MATCH (r:Review)-[:REVIEWED]->(h)
-        WITH h, 
-             collect(r.text)[0..10] as reviews,  // First 10 reviews
+        WITH h,
+             collect(r.text)[0..10] as reviews,
              h.name as name,
              h.star_rating as stars
         RETURN h.hotel_id as hotel_id,
@@ -77,74 +78,74 @@ class DualEmbeddingRetriever:
                reviews
         ORDER BY hotel_id
         """
-        
+
         with self.driver.session() as session:
             result = session.run(query)
             records = result.data()
-        
+
         print(f" Processing {len(records)} hotels...")
-        
+
         embeddings_to_save = []
-        
+
         for i in range(0, len(records), batch_size):
             batch = records[i:i+batch_size]
-            
+
             # Create text representations
             hotel_texts = []
             hotel_ids = []
-            
+
             for record in batch:
                 hotel_id = record['hotel_id']
                 name = record['name']
                 stars = record['stars'] if record['stars'] else 0
                 reviews = record['reviews']
-                
+
                 # Combine into a single text representation
-                # This captures what the hotel is about
                 text_parts = [
                     f"Hotel name: {name}",
                     f"Star rating: {stars} stars"
                 ]
-                
+
                 if reviews:
-                    # Add review content
+                    # Add review content (limit to 500 chars)
                     review_text = " ".join([r for r in reviews if r])
-                    text_parts.append(f"Reviews: {review_text[:500]}")  # Limit length
-                
+                    text_parts.append(f"Reviews: {review_text[:500]}")
+
                 combined_text = ". ".join(text_parts)
-                
+
                 hotel_texts.append(combined_text)
                 hotel_ids.append(hotel_id)
-            
+
             # Generate embeddings for batch
             batch_embeddings = self.text_model.encode(
-                hotel_texts, 
+                hotel_texts,
                 show_progress_bar=False,
                 batch_size=batch_size
             )
-            
+
             # Prepare for Neo4j
             for hotel_id, embedding in zip(hotel_ids, batch_embeddings):
                 embeddings_to_save.append({
                     'hotel_id': hotel_id,
                     'embedding': embedding.tolist()
                 })
-            
+
             if (i // batch_size + 1) % 10 == 0:
                 print(f"    Processed {i + len(batch)}/{len(records)}...")
-        
+
         # Save to Neo4j
         print("  Saving text embeddings to Neo4j...")
-        
+
         with self.driver.session() as session:
             session.run("""
                 UNWIND $embeddings as emb
                 MATCH (h:Hotel {hotel_id: emb.hotel_id})
                 SET h.textEmbedding = emb.embedding
             """, embeddings=embeddings_to_save)
-        
+
         print(f"  Text embeddings created for {len(embeddings_to_save)} hotels")
-    
+        return True
+
     def build_faiss_indices(self, label):
         """Build TWO FAISS indices: Node2Vec and Text"""
         print(f"\n Building FAISS indices for {label}...")
@@ -503,7 +504,7 @@ class DualEmbeddingRetriever:
         else:
             return props[0] if props else None
 
-    def generate_text_embeddings(self, label, batch_size=32):
+    def generate_text_embeddings(self, label, batch_size=1000):
         """
         Generate text embeddings for all nodes of a given label
         Automatically combines relevant text properties
@@ -571,8 +572,8 @@ class DualEmbeddingRetriever:
             # Generate embeddings
             batch_embeddings = self.text_model.encode(
                 node_texts,
-                show_progress_bar=False,
-                batch_size=batch_size
+                show_progress_bar=len(node_texts) > 100,
+                batch_size=64
             )
             
             # Prepare for Neo4j
@@ -663,50 +664,59 @@ class DualEmbeddingRetriever:
     # ==================== SEARCH METHODS ====================
     
     def find_similar_hotels(self, hotel_name, top_k=5):
-        
+        """Find similar hotels using Node2Vec embeddings"""
         print(f"\n Searching similar hotels to: '{hotel_name}'")
-        
+
+        label = 'Hotel'
+
+        # Ensure Hotel index is loaded
+        if label not in self.faiss_node2vec:
+            print(f"  No Hotel index loaded. Attempting to load...")
+            if not self.load_faiss_indices(label):
+                print(f"  Failed to load Hotel index. Run setup first.")
+                return []
+
         # Get hotel_id
         query = "MATCH (h:Hotel {name: $name}) RETURN h.hotel_id as hotel_id"
-        
+
         with self.driver.session() as session:
             result = session.run(query, name=hotel_name)
             record = result.single()
-            
+
             if not record:
                 print(f"  Hotel not found")
                 return []
-            
+
             hotel_id = record['hotel_id']
-        
+
         # Get index position
-        if hotel_id not in self.hotel_id_to_idx:
+        if hotel_id not in self.node_id_to_idx.get(label, {}):
             print(f"  Hotel not in index")
             return []
-        
-        idx = self.hotel_id_to_idx[hotel_id]
-        
+
+        idx = self.node_id_to_idx[label][hotel_id]
+
         # Get Node2Vec embedding
-        query_vector = self.faiss_node2vec.reconstruct(idx).reshape(1, -1)
-        
+        query_vector = self.faiss_node2vec[label].reconstruct(idx).reshape(1, -1)
+
         # Search Node2Vec index
-        distances, indices = self.faiss_node2vec.search(query_vector, top_k + 1)
-        
+        distances, indices = self.faiss_node2vec[label].search(query_vector, top_k + 1)
+
         # Get results (skip query hotel)
         similar_hotel_ids = []
         scores = []
-        
+
         for i, score in zip(indices[0], distances[0]):
-            result_hotel_id = self.idx_to_hotel_id[i]
+            result_hotel_id = self.idx_to_node_id[label][i]
             if result_hotel_id == hotel_id:
                 continue
             similar_hotel_ids.append(result_hotel_id)
             scores.append(float(score))
             if len(similar_hotel_ids) >= top_k:
                 break
-        
+
         # Enrich with details
-        return self._enrich_results(similar_hotel_ids, scores, "Node2Vec similarity")
+        return self._enrich_results(label, similar_hotel_ids, scores, "Node2Vec similarity")
     
     def find_similar_nodes(self, label, node_id, top_k=5):
         """
@@ -908,6 +918,7 @@ class DualEmbeddingRetriever:
     def search_by_query_node2vec(self, query_text, label=None, top_k=5, weight=1.0):
         """Map query text into node2vec space and search Node2Vec FAISS index(es).
         If label is None, searches across all labels that have both W and a node2vec index.
+        Auto-creates missing mappers if indices exist.
         """
         print(f"\n Mapping query to Node2Vec space and searching: '{query_text}'")
         q_text_emb = self.text_model.encode([query_text])[0].astype('float32').reshape(1, -1)
@@ -916,21 +927,34 @@ class DualEmbeddingRetriever:
         if label:
             labels_to_search = [label]
         else:
-            labels_to_search = list(self.faiss_node2vec.keys())
+            # If no indices loaded, try to get labels from Neo4j
+            if not self.faiss_node2vec:
+                labels_to_search = self.get_node_labels()
+            else:
+                labels_to_search = list(self.faiss_node2vec.keys())
 
         results = []
         for lbl in labels_to_search:
-            # Ensure we have a node2vec index and mapper
+            # Step 1: Ensure we have a node2vec index
             if lbl not in self.faiss_node2vec:
-                # Try to load
+                print(f"  Loading FAISS indices for {lbl}...")
                 self.load_faiss_indices(lbl)
             if lbl not in self.faiss_node2vec:
+                print(f"  No Node2Vec index for {lbl}, skipping")
                 continue
+
+            # Step 2: Ensure we have the text->node2vec mapper
             if lbl not in self.text2node_W:
+                print(f"  Loading text2node mapper for {lbl}...")
                 self.load_text2node2vec(lbl)
+
+            # Step 3: If still no mapper, try to create it
             if lbl not in self.text2node_W:
-                # No mapper available for this label
-                continue
+                print(f"  No mapper found for {lbl}, attempting to train...")
+                if not self.train_text2node2vec(lbl):
+                    print(f"  Failed to create mapper for {lbl}, skipping")
+                    continue
+                print(f"  Mapper created successfully for {lbl}")
 
             W = self.text2node_W[lbl]
             # Project into node2vec space
@@ -1084,12 +1108,18 @@ class DualEmbeddingRetriever:
                 with self.driver.session() as session:
                     result = session.run(query)
                     count = result.single()['count']
-                
+
                 if count == 0:
                     print(f"  No text embeddings found. Generating...")
-                    if not self.generate_text_embeddings(label):
-                        print(f"  Skipping {label} - no text properties")
-                        continue
+                    # Use hotel-specific method for richer embeddings (includes reviews)
+                    if label == 'Hotel':
+                        if not self.generate_hotel_text_embeddings():
+                            print(f"  Skipping {label} - failed to generate embeddings")
+                            continue
+                    else:
+                        if not self.generate_text_embeddings(label):
+                            print(f"  Skipping {label} - no text properties")
+                            continue
                 else:
                     print(f"  Found {count} {label} nodes with text embeddings")
                 
@@ -1132,7 +1162,7 @@ def main():
     
     try:
         # Initialize
-        print("🔌 Connecting to Neo4j...")
+        print("Connecting to Neo4j...")
         db = DBManager()
         
         retriever = DualEmbeddingRetriever(db.driver)
@@ -1231,7 +1261,7 @@ def main():
         db.close()
         
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n Error: {e}")
         import traceback
         traceback.print_exc()
 
@@ -1239,7 +1269,7 @@ def main():
 def print_results(results, title):
     """Pretty print results"""
     print("\n" + "="*70)
-    print(f"📋 {title}")
+    print(f" {title}")
     print("="*70)
     
     if not results:

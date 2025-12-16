@@ -1,0 +1,7 @@
+\beamer@sectionintoc {1}{System Architecture}{2}{0}{1}
+\beamer@sectionintoc {2}{Input Preprocessing}{3}{0}{2}
+\beamer@sectionintoc {3}{Graph Retrieval - Baseline}{6}{0}{3}
+\beamer@sectionintoc {4}{Embedding-Based Retrieval}{10}{0}{4}
+\beamer@sectionintoc {5}{LLM Layer}{13}{0}{5}
+\beamer@sectionintoc {6}{Error Analysis \& Improvements}{18}{0}{6}
+\beamer@sectionintoc {7}{Live Demo}{19}{0}{7}
