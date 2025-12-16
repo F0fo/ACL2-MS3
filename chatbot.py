@@ -208,8 +208,8 @@ def create_retrieval_qa_for_model(model, retriever, HF_TOKEN):
 
     # If no retriever (baseline only), create a simple chain that just calls the LLM
     if retriever is None:
-        from langchain.chains import LLMChain
-        from langchain.prompts import PromptTemplate
+        from langchain_core.prompts import PromptTemplate
+        from langchain_classic.chains import LLMChain
         prompt = PromptTemplate(input_variables=["query"], template="{query}")
         return LLMChain(llm=llm, prompt=prompt)
 
@@ -405,8 +405,10 @@ Guidelines:
 - Address the user respectfully as 'sir' at least once in your response
 - Be conversational and natural, as if having a pleasant discussion
 - Provide specific details from the data without mentioning "the data" or "the context"
+- Use the Hotel information data available below (that was retrieved based on the query) as context/baseline information to help with the recommendations.
 - If recommending hotels display ranked recommendations with explanations. Show why certain entities were recommended based on user preferences and KG data 
 - Keep responses concise but informative
+
 
 User's query: {query}
 
