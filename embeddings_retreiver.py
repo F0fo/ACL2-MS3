@@ -888,10 +888,31 @@ class FeatureEmbeddingRetriever:
 
         return found_city, found_country
 
+    def _get_name_match_boost(self, query_text, hotel_name):
+        """
+        Calculate a boost score if query words match hotel name.
+        Returns a boost multiplier (1.0 = no boost, higher = boost).
+        """
+        query_words = set(query_text.lower().split())
+        hotel_words = set(hotel_name.lower().replace("'", "").split())
+
+        # Remove common stop words
+        stop_words = {'the', 'a', 'an', 'in', 'at', 'for', 'with', 'and', 'or', 'hotel', 'hotels', 'good', 'best', 'top'}
+        query_words = query_words - stop_words
+
+        # Check for matches
+        matches = query_words & hotel_words
+
+        if matches:
+            # Boost based on number of matching words
+            return 1.0 + (0.2 * len(matches))  # 20% boost per matching word
+        return 1.0
+
     def search_by_query(self, query_text, top_k=5):
         """
         Search for hotels using a natural language query.
         - Extracts location (city/country) from query for filtering
+        - Boosts hotels whose names match query keywords
         - Maps query text to feature space for similarity ranking
         """
         print(f"\n [Feature] Searching by query: '{query_text}'")
@@ -927,9 +948,9 @@ class FeatureEmbeddingRetriever:
         # Normalize for cosine similarity
         faiss.normalize_L2(query_feature)
 
-        # Search FAISS - get more results if we're filtering by location
-        search_k = top_k * 5 if (filter_city or filter_country) else top_k
-        D, I = self.faiss_index.search(query_feature, min(search_k, self.faiss_index.ntotal))
+        # Search FAISS - get all results to allow name matching and re-ranking
+        # We search all hotels and then apply filters + boosts before limiting to top_k
+        D, I = self.faiss_index.search(query_feature, self.faiss_index.ntotal)
 
         # Get hotel details
         hotel_ids = [self.idx_to_hotel_id[i] for i in I[0]]
@@ -961,12 +982,18 @@ class FeatureEmbeddingRetriever:
                 if filter_country and details['country'] != filter_country:
                     continue
 
+                # Apply name match boost
+                name_boost = self._get_name_match_boost(query_text, details['name'])
+                boosted_score = float(score) * name_boost
+
                 results.append({
                     'hotel': details['name'],
                     'hotel_id': hotel_id,
                     'city': details['city'],
                     'country': details['country'],
-                    'score': float(score),
+                    'score': boosted_score,
+                    'base_score': float(score),
+                    'name_boost': name_boost,
                     'star_rating': details.get('star_rating'),
                     'review_count': details.get('review_count'),
                     'avg_score': details.get('avg_score'),
@@ -975,10 +1002,9 @@ class FeatureEmbeddingRetriever:
                     'facilities': details.get('facilities')
                 })
 
-                if len(results) >= top_k:
-                    break
-
-        return results
+        # Re-sort by boosted score and limit to top_k
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return results[:top_k]
 
     def setup_embeddings(self):
         """Complete Feature Embedding setup"""
@@ -1103,7 +1129,8 @@ def main():
                     print(f"\n Search Results for: '{args.query}'")
                     print("-" * 70)
                     for i, r in enumerate(results, 1):
-                        print(f"{i}. {r['hotel']} ({r['city']}, {r['country']})")
+                        boost_indicator = " [name match]" if r.get('name_boost', 1.0) > 1.0 else ""
+                        print(f"{i}. {r['hotel']} ({r['city']}, {r['country']}){boost_indicator}")
                         print(f"   Score: {r['score']:.4f} | Stars: {r['star_rating']} | Reviews: {r['review_count']}")
                         print(f"   Avg Score: {r['avg_score']:.1f} | Clean: {r['cleanliness']:.1f} | Comfort: {r['comfort']:.1f} | Facilities: {r['facilities']:.1f}")
                         print()
