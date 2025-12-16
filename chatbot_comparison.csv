@@ -1,5 +1,15 @@
 model,latency_sec,input_tokens,output_tokens,total_tokens,input_cost_usd,output_cost_usd,total_cost_usd,semantic_accuracy,response
-Gemma-2-2B,0.806,10,53,63,1e-06,1.1e-05,1.2e-05,0.077,"Based on the information provided, I recommend the Kyo-to Grand in Tokyo, Japan. It has a 5.0 star rating, an average score of 8.969, and excellent ratings for cleanliness, comfort, facilities, and location. 
+Gemma-2-2B,0.924,10,53,63,1e-06,1.1e-05,1.2e-05,0.077,"Based on the information provided, I recommend the Kyo-to Grand in Tokyo, Japan. 
+
+It has a 5.0 star rating, an average score of 8.969, and excellent ratings for cleanliness, comfort, facilities, and location. 
 "
-Mistral-7B,4.074,10,85,95,2e-06,5.1e-05,5.3e-05,0.075," Based on the information provided, I would recommend the Kyo-to Grand hotel in Tokyo, Japan. It has a 5-star rating and an average score of 8.97. The cleanliness score is 9.39, comfort score is 8.97, facilities score is 9.02, and location score is 8.65. Overall, it seems like a great option with high ratings across all categories."
-LLaMA-3.1-8B,1.554,10,52,62,3e-06,4.2e-05,4.5e-05,0.082,"Based on the provided context, I would recommend the Kyo-to Grand hotel in Tokyo, Japan. It has a 5.0-star rating and high scores in various categories, including cleanliness, comfort, facilities, and overall average score."
+Mistral-7B,4.252,10,85,95,2e-06,5.1e-05,5.3e-05,0.075," Based on the information provided, I would recommend the Kyo-to Grand hotel in Tokyo, Japan. It has a 5-star rating and an average score of 8.97. The cleanliness score is 9.39, comfort score is 8.97, facilities score is 9.02, and location score is 8.65. Overall, it seems like a great option with high ratings across all categories."
+LLaMA-3.1-8B,3.212,10,228,238,3e-06,0.000182,0.000185,0.054,"Based on the given context, I would highly recommend the Kyo-to Grand hotel in Tokyo, Japan. It has a 5.0-star rating and an average score of 8.97, indicating excellent quality and service. 
+
+The hotel's cleanliness is particularly noteworthy, with a score of 9.39 out of 10. This suggests that the hotel takes great care in maintaining a clean and hygienic environment for its guests.
+
+Additionally, the hotel's comfort and facilities scores are also very high, with 8.97 and 9.02 respectively. This implies that the hotel provides comfortable accommodations and a wide range of amenities to cater to its guests' needs.
+
+Lastly, the hotel's location score of 8.65 suggests that it is well-located, but not necessarily in the most ideal spot. However, this is still a high score, and it's likely that the hotel's other qualities make up for any minor drawbacks in its location.
+
+Overall, the Kyo-to Grand hotel seems like an excellent choice for anyone looking for a high-quality hotel experience in Tokyo, Japan."

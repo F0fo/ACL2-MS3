@@ -136,7 +136,7 @@ if user_question:
     st.subheader("AI Response")
     try:
         with st.spinner(f"Generating response with {model_option}..."):
-            answer_gemma, answer_mistral, answer_llama = call_llm(user_question, baseline_context=valid_context)
+            answer_gemma, answer_mistral, answer_llama, eval_results = call_llm(user_question, baseline_context=valid_context)
 
         # Select answer based on model choice
         if model_option == "Gemma":
@@ -148,14 +148,47 @@ if user_question:
 
         st.success(selected_answer)
 
-        # Optionally show all model responses in expanders
+        # Show all model responses with metrics
         with st.expander("View All Model Responses"):
-            st.markdown("**Gemma:**")
-            st.write(answer_gemma)
-            st.markdown("**Mistral:**")
-            st.write(answer_mistral)
-            st.markdown("**LLaMA:**")
-            st.write(answer_llama)
+            # Display comparison table
+            st.markdown("### Model Comparison Metrics")
+            metrics_data = []
+            for model_key in ['gemma', 'mistral', 'llama']:
+                if model_key in eval_results:
+                    m = eval_results[model_key]
+                    metrics_data.append({
+                        'Model': m.get('model', model_key),
+                        'Latency (s)': m.get('latency_sec', 'N/A'),
+                        'Input Tokens': m.get('input_tokens', 'N/A'),
+                        'Output Tokens': m.get('output_tokens', 'N/A'),
+                        'Total Cost ($)': m.get('total_cost_usd', 'N/A'),
+                        'Semantic Accuracy': m.get('semantic_accuracy', 'N/A')
+                    })
+            if metrics_data:
+                st.dataframe(pd.DataFrame(metrics_data), use_container_width=True)
+
+            st.markdown("---")
+
+            # Individual responses
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.markdown("**Gemma-2-2B:**")
+                if 'gemma' in eval_results:
+                    st.caption(f"⏱️ {eval_results['gemma'].get('latency_sec', 'N/A')}s | 💰 ${eval_results['gemma'].get('total_cost_usd', 'N/A')}")
+                st.write(answer_gemma)
+
+            with col2:
+                st.markdown("**Mistral-7B:**")
+                if 'mistral' in eval_results:
+                    st.caption(f"⏱️ {eval_results['mistral'].get('latency_sec', 'N/A')}s | 💰 ${eval_results['mistral'].get('total_cost_usd', 'N/A')}")
+                st.write(answer_mistral)
+
+            with col3:
+                st.markdown("**LLaMA-3.1-8B:**")
+                if 'llama' in eval_results:
+                    st.caption(f"⏱️ {eval_results['llama'].get('latency_sec', 'N/A')}s | 💰 ${eval_results['llama'].get('total_cost_usd', 'N/A')}")
+                st.write(answer_llama)
 
     except Exception as e:
         st.error(f"Error calling LLM: {e}")

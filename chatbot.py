@@ -455,16 +455,17 @@ Please answer the user's query based on the above data.'''
     )
 
     #  -------------- RETURNS  --------------
-    results = []
-    results.append(comparsion_gemma)
-    results.append(comparison_Mistral)
-    results.append(comparison_llama)
+    eval_results = {
+        'gemma': comparsion_gemma,
+        'mistral': comparison_Mistral,
+        'llama': comparison_llama
+    }
 
-    df = pd.DataFrame(results)
+    df = pd.DataFrame([comparsion_gemma, comparison_Mistral, comparison_llama])
     print(df[["model","latency_sec","input_tokens","output_tokens","total_cost_usd","semantic_accuracy"]])
     df.to_csv("chatbot_comparison.csv", index=False)
 
-    return answer_gemma,answer_mistral, answer_llama
+    return answer_gemma, answer_mistral, answer_llama, eval_results
 
 
 if __name__ == "__main__":
