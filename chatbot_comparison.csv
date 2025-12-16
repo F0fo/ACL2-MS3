@@ -1,17 +1,30 @@
 model,latency_sec,input_tokens,output_tokens,total_tokens,input_cost_usd,output_cost_usd,total_cost_usd,semantic_accuracy,response
-Gemma-2-2B,0.407,7,8,15,1e-06,2e-06,2e-06,-0.015,"I don't know. 
+Gemma-2-2B,0.496,6,8,14,1e-06,2e-06,2e-06,0.057,"I don't know. 
 "
-Mistral-7B,5.178,7,131,138,1e-06,7.9e-05,8e-05,0.019," Based on the context provided, I cannot directly answer your question as there is no specific hotel mentioned in the context. However, I can suggest some general ways to find a hotel with good cleanliness. You can check online reviews on websites like TripAdvisor, Expedia, or Booking.com. Look for hotels with high ratings and positive reviews regarding cleanliness. Additionally, some hotel chains prioritize cleanliness and have specific cleaning protocols in place, such as Marriott's ""Commitment to Clean"" program or Hilton's ""CleanStay"" program. You can also contact the hotel directly and ask about their cleaning procedures."
-LLaMA-3.1-8B,2.552,7,187,194,2e-06,0.00015,0.000152,0.01,"I'd be happy to help you find a hotel with good cleanliness. 
+Mistral-7B,7.721,6,190,196,1e-06,0.000114,0.000115,0.37," Based on the context provided, I cannot directly answer with specific hotel recommendations for seniors. However, I can suggest some general features and amenities that may be desirable for senior travelers when choosing a hotel:
 
-Some popular hotel chains known for their cleanliness include:
+1. Accessibility: Look for hotels with wheelchair accessibility and elevators.
+2. Location: Consider hotels that are centrally located, close to public transportation, and within walking distance of attractions.
+3. Services: Hotels with concierge services, room service, and 24-hour front desk can be helpful for seniors.
+4. Comfort: Rooms with comfortable beds, adjustable temperature controls, and quiet environments can be important.
+5. Safety: Hotels with good security, emergency call systems, and clear signage can provide peace of mind for seniors.
 
-1. Marriott: Known for their high standards of cleanliness and hygiene.
-2. Hilton: Offers a range of amenities and services to ensure a clean and comfortable stay.
-3. Four Seasons: Provides luxurious accommodations with a focus on cleanliness and attention to detail.
-4. The Ritz-Carlton: Offers upscale amenities and services, including a focus on cleanliness and guest satisfaction.
-5. Accor: A global hotel chain with a range of brands, including Ibis and Novotel, which are known for their cleanliness and affordability.
+Some popular hotel chains known for their senior-friendly amenities include Marriott, Hilton, and Sheraton. However, it's always a good idea to contact the hotel directly to ask about specific features and services."
+LLaMA-3.1-8B,5.353,6,441,447,2e-06,0.000353,0.000355,0.252,"Based on general information, here are some hotels that are often recommended for seniors due to their accessibility features, amenities, and services:
 
-You can also check online reviews from sources like TripAdvisor, Yelp, or Google to see what other guests have to say about the cleanliness of a particular hotel.
+1. **Hilton Hotels**: Many Hilton hotels have accessible rooms and amenities, such as roll-in showers, grab bars, and wheelchair-accessible entrances.
+2. **Marriott Hotels**: Marriott hotels often have accessible rooms and amenities, including wheelchair-accessible rooms, roll-in showers, and grab bars.
+3. **Hyatt Hotels**: Hyatt hotels often have accessible rooms and amenities, including wheelchair-accessible rooms, roll-in showers, and grab bars.
+4. **AARP Recommended Hotels**: The AARP (American Association of Retired Persons) has a list of recommended hotels that cater to seniors, including hotels with accessible rooms, amenities, and services.
+5. **Senior-friendly resorts**: Some resorts, such as **Club Med**, **Sandals Resorts**, and **Beaches Resorts**, offer senior-friendly amenities and services, including accessible rooms, roll-in showers, and grab bars.
 
-What's your preferred location or budget for the hotel?"
+Some specific hotels that are known for their senior-friendly amenities and services include:
+
+1. **The Ritz-Carlton, Half Moon Bay** (California, USA): Offers accessible rooms, roll-in showers, and grab bars.
+2. **The Fairmont Orchid** (Hawaii, USA): Offers accessible rooms, roll-in showers, and grab bars.
+3. **The Langham, London** (UK): Offers accessible rooms, roll-in showers, and grab bars.
+4. **The Four Seasons Hotel, New York City** (New York, USA): Offers accessible rooms, roll-in showers, and grab bars.
+
+Please note that these are just a few examples, and there are many other hotels that cater to seniors. It's always a good idea to research and contact the hotel directly to confirm their accessibility features and services.
+
+I don't know which specific hotel would be the best for a senior based on their individual needs and preferences."
