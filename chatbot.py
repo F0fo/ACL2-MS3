@@ -171,11 +171,19 @@ def process_query_for_baseline(user_query,driver):
 
 
 #################################### 2) EMBEDDING ###################################################################
-def build_shared_retriever(db_manager: Optional[DBManager] = None):
-    # Try to construct a reusable retriever from HotelEmbeddingRetriever (with location filtering)
+def build_shared_retriever(db_manager: Optional[DBManager] = None, embedding_model: str = 'feature'):
+    """
+    Build the embedding retriever for LangChain.
+
+    Args:
+        db_manager: Database manager instance
+        embedding_model: 'feature' or 'node2vec'
+            - feature: 12-dim property-based embeddings (better for attribute queries)
+            - node2vec: 128-dim graph structure embeddings (better for relationship patterns)
+    """
     try:
-        # Create the unified hotel retriever (uses 'feature' model by default)
-        hotel_retriever = HotelEmbeddingRetriever(db_manager.driver, model_type='feature')
+        # Create the unified hotel retriever with selected model type
+        hotel_retriever = HotelEmbeddingRetriever(db_manager.driver, model_type=embedding_model)
 
         # Wrap it for LangChain compatibility
         retriever = DualEmbeddingRetrieverWrapper(retriever=hotel_retriever, k=5)
@@ -363,8 +371,15 @@ def format_context_for_llm(context):
     return "\n".join(formatted) if formatted else "No relevant data found."
 
 
-def call_llm(query, baseline_context=None):
+def call_llm(query, baseline_context=None, embedding_model='feature'):
+    """
+    Call LLM with the query and context.
 
+    Args:
+        query: User's question
+        baseline_context: Context from graph retrieval
+        embedding_model: 'feature' or 'node2vec' embedding model to use
+    """
     db_manager = DBManager()
     HF_TOKEN = os.getenv("HUGGING_FACE_API_KEY")
     if not HF_TOKEN:
@@ -388,7 +403,7 @@ Retrieved hotel data:
 Please answer the user's query based on the above data.'''
 
     #  -------------- 2) Build or reuse a shared retriever (embeddings + vectorstore). --------------
-    shared_retriever = build_shared_retriever(db_manager)
+    shared_retriever = build_shared_retriever(db_manager, embedding_model=embedding_model)
 
     #  -------------- 3) Create a QA chain per model (these reuse shared_retriever) --------------
     gemma_qa = create_Gemma_llm(shared_retriever, HF_TOKEN)

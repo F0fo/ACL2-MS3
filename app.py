@@ -77,12 +77,25 @@ def visualize_neo4j_subgraph(context, params):
 
 st.title("Hotel Recommender System")
 
-# Model selection
-model_option = st.selectbox(
-    "Select LLM Model:",
-    options=["Gemma", "Mistral", "LLaMA"],
-    index=0
-)
+# Model selection row
+col_llm, col_embed = st.columns(2)
+
+with col_llm:
+    model_option = st.selectbox(
+        "Select LLM Model:",
+        options=["Gemma", "Mistral", "LLaMA"],
+        index=0
+    )
+
+with col_embed:
+    embedding_option = st.selectbox(
+        "Select Node Embedding Model:",
+        options=["Node2Vec (128-dim)", "FastRP (128-dim)"],
+        index=0,
+        help="Node2Vec: Random walk-based graph embeddings. Captures neighborhood structure through simulated walks.\n\nFastRP: Fast Random Projection embeddings. Faster computation using random projections."
+    )
+    # Map display name to model type
+    embedding_model = 'node2vec' if 'Node2Vec' in embedding_option else 'fastrp'
 
 # Query input
 user_question = st.text_input("Ask me anything about hotels:")
@@ -134,9 +147,14 @@ if user_question:
 
     # LLM Response
     st.subheader("AI Response")
+    st.caption(f"Using **{embedding_option}** embeddings")
     try:
-        with st.spinner(f"Generating response with {model_option}..."):
-            answer_gemma, answer_mistral, answer_llama, eval_results = call_llm(user_question, baseline_context=valid_context)
+        with st.spinner(f"Generating response with {model_option} + {embedding_option}..."):
+            answer_gemma, answer_mistral, answer_llama, eval_results = call_llm(
+                user_question,
+                baseline_context=valid_context,
+                embedding_model=embedding_model
+            )
 
         # Select answer based on model choice
         if model_option == "Gemma":

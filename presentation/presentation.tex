@@ -568,7 +568,7 @@ Corporate Tower & 8.7 \\
 \begin{frame}{Embedding Implementation Details}
 \begin{columns}
 \begin{column}{0.5\textwidth}
-\textbf{Node2Vec (Graph Structure):}
+\textbf{Node2Vec (Random Walks):}
 \begin{itemize}
     \scriptsize
     \item Uses Neo4j Graph Data Science (GDS)
@@ -583,39 +583,42 @@ Corporate Tower & 8.7 \\
 \begin{enumerate}
     \scriptsize
     \item Project graph to GDS catalog
-    \item Run node2vec.stream() algorithm
+    \item Run gds.node2vec.write() algorithm
     \item Extract 128-dim vectors per node
     \item Build FAISS index for hotels only
-    \item Store hotel\_id $\leftrightarrow$ index mapping
+    \item Store in Neo4j vector index
 \end{enumerate}
 \end{column}
 
 \begin{column}{0.5\textwidth}
-\textbf{Feature-Based (Property Vectors):}
+\textbf{FastRP (Random Projection):}
 \begin{itemize}
     \scriptsize
-    \item Aggregates review scores per hotel
-    \item Computes: avg\_cleanliness, avg\_comfort, avg\_facilities, avg\_location, avg\_staff, avg\_value
-    \item Normalizes features to [0,1] range
-    \item Creates 12-dimensional feature vector
+    \item Also uses Neo4j GDS library
+    \item Random projection-based embeddings
+    \item Parameters: iterationWeights=[0,1,1,1]
+    \item Faster computation than Node2Vec
+    \item Same graph structure input
 \end{itemize}
 
 \vspace{0.2cm}
-\textbf{12 Feature Dimensions:}
+\textbf{How it works:}
 \begin{enumerate}
     \scriptsize
-    \item hotel\_id (normalized)
-    \item star\_rating
-    \item review\_count (log-scaled)
-    \item avg\_reviewer\_score
-    \item avg\_cleanliness
-    \item avg\_comfort
-    \item avg\_facilities
-    \item avg\_location
-    \item avg\_staff
-    \item avg\_value
-    \item city\_id, country\_id (encoded)
+    \item Project graph to GDS catalog
+    \item Run gds.fastRP.write() algorithm
+    \item Extract 128-dim vectors per node
+    \item Build separate FAISS index
+    \item Store in Neo4j vector index
 \end{enumerate}
+
+\vspace{0.2cm}
+\textbf{Key Difference:}
+\begin{itemize}
+    \scriptsize
+    \item Node2Vec: Simulates walks (slower, more expressive)
+    \item FastRP: Random projections (faster, efficient)
+\end{itemize}
 \end{column}
 \end{columns}
 \end{frame}
@@ -627,20 +630,23 @@ Corporate Tower & 8.7 \\
 \footnotesize
 \begin{tabular}{lcc}
 \toprule
-\textbf{Property} & \textbf{Node2Vec} & \textbf{Feature-Based} \\
+\textbf{Property} & \textbf{Node2Vec} & \textbf{FastRP} \\
 \midrule
-Algorithm & GDS Node2Vec & Property Aggregation \\
-Dimension & 128 & 12 \\
-Input & Graph structure (5 node types) & Hotel properties + review stats \\
-Captures & Relationship paths, connectivity & Ratings, scores, computed averages \\
+Algorithm & Random Walks & Random Projection \\
+Dimension & 128 & 128 \\
+Neo4j GDS Function & gds.node2vec.write() & gds.fastRP.write() \\
+Input & Graph structure (5 node types) & Graph structure (5 node types) \\
 \midrule
 Walk Length & 40 & -- \\
 Iterations & 10 & -- \\
-Features & -- & star\_rating, avg\_cleanliness, avg\_comfort, \\
- & & avg\_facilities, avg\_location, avg\_staff, avg\_value \\
+Iteration Weights & -- & [0.0, 1.0, 1.0, 1.0] \\
+Computation Time & $\sim$2-3s & $\sim$0.2s \\
+\midrule
+Storage & Neo4j + FAISS & Neo4j + FAISS \\
+Similarity & Cosine (via FAISS) & Cosine (via FAISS) \\
 \bottomrule
 \end{tabular}
-\caption{Embedding Configuration Comparison}
+\caption{Two Node Embedding Models for Comparison}
 \end{table}
 
 \vspace{0.2cm}
@@ -649,20 +655,20 @@ Features & -- & star\_rating, avg\_cleanliness, avg\_comfort, \\
 \textbf{Node2Vec Strengths:}
 \begin{itemize}
     \scriptsize
-    \item Captures hotel-city-country paths
-    \item Similar locations $\rightarrow$ similar vectors
-    \item Traveller connection patterns
-    \item Fast similarity lookup (4ms)
+    \item Captures higher-order neighborhood patterns
+    \item Better at finding structurally similar nodes
+    \item Flexible p,q parameters for exploration
+    \item More expressive representations
 \end{itemize}
 \end{column}
 \begin{column}{0.5\textwidth}
-\textbf{Feature-Based Strengths:}
+\textbf{FastRP Strengths:}
 \begin{itemize}
     \scriptsize
-    \item Natural language query support
-    \item Location/star rating filtering
-    \item Attribute-based ranking (``best cleanliness'')
-    \item Synonym + fuzzy matching
+    \item 10x faster computation ($\sim$0.2s vs $\sim$2s)
+    \item Memory efficient
+    \item Good for large-scale graphs
+    \item Simpler hyperparameters
 \end{itemize}
 \end{column}
 \end{columns}
@@ -689,11 +695,11 @@ Table Mountain View (Cape Town) & 0.587 \\
 \end{tabular}
 
 \vspace{0.2cm}
-\textbf{Finds:} Hotels with similar graph connectivity patterns (shared traveller demographics, review patterns)
+\textbf{Method:} Random walks capture neighborhood structure and traveller patterns
 \end{column}
 
 \begin{column}{0.5\textwidth}
-\textbf{Feature-Based Search:}
+\textbf{FastRP Search:}
 
 Query Hotel: ``Berlin Mitte Elite''
 
@@ -703,19 +709,19 @@ Query Hotel: ``Berlin Mitte Elite''
 \hline
 \textbf{Similar Hotel} & \textbf{Score} \\
 \hline
-The Kiwi Grand (Wellington) & 0.995 \\
-Han River Oasis (Seoul) & 0.979 \\
-Kremlin Suites (Moscow) & 0.977 \\
+The Kiwi Grand (Wellington) & 0.712 \\
+Han River Oasis (Seoul) & 0.698 \\
+Kremlin Suites (Moscow) & 0.685 \\
 \hline
 \end{tabular}
 
 \vspace{0.2cm}
-\textbf{Finds:} Hotels with similar ratings and review scores (5-star, high cleanliness, similar avg scores)
+\textbf{Method:} Random projections capture immediate neighborhood relationships
 \end{column}
 \end{columns}
 
 \vspace{0.3cm}
-\textbf{Key Insight:} Node2Vec captures structural similarity (traveller patterns); Feature-based captures property similarity (ratings/scores).
+\textbf{Key Insight:} Both capture graph structure, but Node2Vec explores deeper paths while FastRP focuses on immediate neighbors.
 \end{frame}
 
 %------------------------------------------------------------------------------
