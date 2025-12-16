@@ -127,13 +127,32 @@ with st.sidebar:
         help="Select the language model for generating responses"
     )
 
-    embedding_option = st.selectbox(
-        "Embedding Model",
-        options=["Node2Vec (128-dim)", "FastRP (128-dim)"],
+    st.markdown("---")
+    st.markdown("### Retrieval Method")
+
+    retrieval_method = st.selectbox(
+        "Retrieval Strategy",
+        options=["Both (Hybrid)", "Baseline Only", "Embeddings Only"],
         index=0,
-        help="Node2Vec: Random walk-based\nFastRP: Fast random projection"
+        help="Baseline: Cypher queries\nEmbeddings: Vector similarity\nBoth: Combined context"
     )
-    embedding_model = 'node2vec' if 'Node2Vec' in embedding_option else 'fastrp'
+
+    # Only show embedding model if embeddings are used
+    if retrieval_method != "Baseline Only":
+        embedding_option = st.selectbox(
+            "Embedding Model",
+            options=["Node2Vec (128-dim)", "FastRP (128-dim)"],
+            index=0,
+            help="Node2Vec: Random walk-based\nFastRP: Fast random projection"
+        )
+        embedding_model = 'node2vec' if 'Node2Vec' in embedding_option else 'fastrp'
+    else:
+        embedding_model = None
+        embedding_option = None
+
+    # Flags for retrieval methods
+    use_baseline = retrieval_method in ["Both (Hybrid)", "Baseline Only"]
+    use_embeddings = retrieval_method in ["Both (Hybrid)", "Embeddings Only"]
 
 
 # Sample questions
@@ -186,118 +205,154 @@ if user_question:
     if entities:
         st.json(entities)
 
-    # KG Context
-    st.subheader("Knowledge Graph Context")
-    context = process_query_for_baseline(user_question, st.session_state.db_manager.driver)
+    # Initialize context variables
+    valid_context = []
+    embedding_results = []
 
-    valid_context = [c for c in context if c]
-    if valid_context:
-        for idx, ctx in enumerate(valid_context, 1):
-            with st.expander(f"Context {idx}", expanded=False):
-                # Show cypher query
-                query_text = ctx.get('query') if isinstance(ctx, dict) else None
-                if query_text:
-                    st.code(query_text, language='cypher')
+    # Baseline: KG Context (Cypher queries)
+    if use_baseline:
+        st.subheader("Baseline: Knowledge Graph Context")
+        context = process_query_for_baseline(user_question, st.session_state.db_manager.driver)
 
-                # Render rows (aggregations) or graph
-                if isinstance(ctx, dict) and 'rows' in ctx and ctx['rows']:
-                    st.dataframe(pd.DataFrame(ctx['rows']), use_container_width=True)
-                elif isinstance(ctx, dict) and 'graph' in ctx:
-                    st.json({'nodes': len(ctx['graph'].get('nodes', [])), 'relationships': len(ctx['graph'].get('relationships', []))})
-                    # Provide raw preview
-                    st.write("Sample nodes (up to 5):")
-                    sample_nodes = ctx['graph'].get('nodes', [])[:5]
-                    st.json(sample_nodes)
-                else:
-                    st.write(ctx)
-    else:
-        st.warning("No context retrieved")
+        valid_context = [c for c in context if c]
+        if valid_context:
+            for idx, ctx in enumerate(valid_context, 1):
+                with st.expander(f"Context {idx}", expanded=False):
+                    # Show cypher query
+                    query_text = ctx.get('query') if isinstance(ctx, dict) else None
+                    if query_text:
+                        st.code(query_text, language='cypher')
 
-    # Graph Visualization
-    if valid_context:
-        st.subheader("Graph Visualization")
-        visualize_neo4j_subgraph(valid_context, params)
+                    # Render rows (aggregations) or graph
+                    if isinstance(ctx, dict) and 'rows' in ctx and ctx['rows']:
+                        st.dataframe(pd.DataFrame(ctx['rows']), use_container_width=True)
+                    elif isinstance(ctx, dict) and 'graph' in ctx:
+                        st.json({'nodes': len(ctx['graph'].get('nodes', [])), 'relationships': len(ctx['graph'].get('relationships', []))})
+                        # Provide raw preview
+                        st.write("Sample nodes (up to 5):")
+                        sample_nodes = ctx['graph'].get('nodes', [])[:5]
+                        st.json(sample_nodes)
+                    else:
+                        st.write(ctx)
 
-    # Embedding Comparison
-    st.subheader("Embedding Model Comparison")
+            # Graph Visualization
+            st.subheader("Graph Visualization")
+            visualize_neo4j_subgraph(valid_context, params)
+        else:
+            st.warning("No baseline context retrieved")
 
-    # Extract hotel name from entities or context results
-    reference_hotel = entities.get('hotels', [None])[0] if entities.get('hotels') else None
+    # Embeddings: Vector similarity search
+    if use_embeddings:
+        st.subheader("Embeddings: Vector Similarity Search")
 
-    # If no hotel in query, try to get one from the context results
-    if not reference_hotel and valid_context:
-        for ctx in valid_context:
-            if isinstance(ctx, dict):
-                # Check rows for hotel names
-                if 'rows' in ctx and ctx['rows']:
-                    for row in ctx['rows']:
-                        if 'name' in row and row['name']:
-                            reference_hotel = row['name']
-                            break
-                # Check graph nodes for hotels
-                elif 'graph' in ctx:
-                    for node in ctx['graph'].get('nodes', []):
-                        if 'Hotel' in node.get('labels', []):
-                            reference_hotel = node.get('properties', {}).get('name')
-                            if reference_hotel:
+        # Extract hotel name from entities or context results
+        reference_hotel = entities.get('hotels', [None])[0] if entities.get('hotels') else None
+
+        # If no hotel in query, try to get one from the context results
+        if not reference_hotel and valid_context:
+            for ctx in valid_context:
+                if isinstance(ctx, dict):
+                    # Check rows for hotel names
+                    if 'rows' in ctx and ctx['rows']:
+                        for row in ctx['rows']:
+                            if 'name' in row and row['name']:
+                                reference_hotel = row['name']
                                 break
-            if reference_hotel:
-                break
+                    # Check graph nodes for hotels
+                    elif 'graph' in ctx:
+                        for node in ctx['graph'].get('nodes', []):
+                            if 'Hotel' in node.get('labels', []):
+                                reference_hotel = node.get('properties', {}).get('name')
+                                if reference_hotel:
+                                    break
+                if reference_hotel:
+                    break
 
-    if reference_hotel:
-        st.caption(f"Finding hotels similar to **{reference_hotel}** using different embedding models")
+        if reference_hotel:
+            st.caption(f"Finding hotels similar to **{reference_hotel}** using **{embedding_option}**")
 
-        try:
-            emb_col1, emb_col2 = st.columns(2)
+            try:
+                # Get results from selected embedding model
+                retriever = HotelEmbeddingRetriever(st.session_state.db_manager.driver, model_type=embedding_model)
+                embedding_results = retriever.find_similar_hotels(reference_hotel, top_k=5)
 
-            with emb_col1:
-                st.markdown("**Node2Vec** (graph structure)")
-                node2vec_retriever = HotelEmbeddingRetriever(st.session_state.db_manager.driver, model_type='node2vec')
-                node2vec_results = node2vec_retriever.find_similar_hotels(reference_hotel, top_k=5)
-
-                if node2vec_results:
-                    n2v_data = []
-                    for i, r in enumerate(node2vec_results, 1):
-                        n2v_data.append({
+                if embedding_results:
+                    emb_data = []
+                    for i, r in enumerate(embedding_results, 1):
+                        emb_data.append({
                             'Rank': i,
                             'Hotel': r.get('hotel', r.get('name', 'Unknown')),
                             'Similarity': f"{r.get('score', 0):.4f}"
                         })
-                    st.dataframe(pd.DataFrame(n2v_data), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(emb_data), use_container_width=True, hide_index=True)
                 else:
-                    st.info("No results from Node2Vec")
+                    st.info(f"No results from {embedding_option}")
 
-            with emb_col2:
-                st.markdown("**FastRP** (random projection)")
-                fastrp_retriever = HotelEmbeddingRetriever(st.session_state.db_manager.driver, model_type='fastrp')
-                fastrp_results = fastrp_retriever.find_similar_hotels(reference_hotel, top_k=5)
+                # Show comparison between models
+                with st.expander("Compare Both Embedding Models"):
+                    emb_col1, emb_col2 = st.columns(2)
 
-                if fastrp_results:
-                    frp_data = []
-                    for i, r in enumerate(fastrp_results, 1):
-                        frp_data.append({
-                            'Rank': i,
-                            'Hotel': r.get('hotel', r.get('name', 'Unknown')),
-                            'Similarity': f"{r.get('score', 0):.4f}"
-                        })
-                    st.dataframe(pd.DataFrame(frp_data), use_container_width=True, hide_index=True)
-                else:
-                    st.info("No results from FastRP")
+                    with emb_col1:
+                        st.markdown("**Node2Vec** (graph structure)")
+                        node2vec_retriever = HotelEmbeddingRetriever(st.session_state.db_manager.driver, model_type='node2vec')
+                        node2vec_results = node2vec_retriever.find_similar_hotels(reference_hotel, top_k=5)
 
-        except Exception as e:
-            st.warning(f"Could not compare embeddings: {e}")
-    else:
-        st.info("No hotel found in query or results to compare embeddings")
+                        if node2vec_results:
+                            n2v_data = []
+                            for i, r in enumerate(node2vec_results, 1):
+                                n2v_data.append({
+                                    'Rank': i,
+                                    'Hotel': r.get('hotel', r.get('name', 'Unknown')),
+                                    'Similarity': f"{r.get('score', 0):.4f}"
+                                })
+                            st.dataframe(pd.DataFrame(n2v_data), use_container_width=True, hide_index=True)
+                        else:
+                            st.info("No results from Node2Vec")
+
+                    with emb_col2:
+                        st.markdown("**FastRP** (random projection)")
+                        fastrp_retriever = HotelEmbeddingRetriever(st.session_state.db_manager.driver, model_type='fastrp')
+                        fastrp_results = fastrp_retriever.find_similar_hotels(reference_hotel, top_k=5)
+
+                        if fastrp_results:
+                            frp_data = []
+                            for i, r in enumerate(fastrp_results, 1):
+                                frp_data.append({
+                                    'Rank': i,
+                                    'Hotel': r.get('hotel', r.get('name', 'Unknown')),
+                                    'Similarity': f"{r.get('score', 0):.4f}"
+                                })
+                            st.dataframe(pd.DataFrame(frp_data), use_container_width=True, hide_index=True)
+                        else:
+                            st.info("No results from FastRP")
+
+            except Exception as e:
+                st.warning(f"Could not retrieve embeddings: {e}")
+        else:
+            st.info("No hotel found in query or results for embedding search")
 
     # LLM Response
     st.subheader("J.A.R.V.I.S. Response")
-    st.caption(f"Using **{model_option}** with **{embedding_option}** embeddings")
+
+    # Build caption based on retrieval method
+    if retrieval_method == "Both (Hybrid)":
+        method_caption = f"Using **{model_option}** | Retrieval: **Baseline + {embedding_option}**"
+    elif retrieval_method == "Baseline Only":
+        method_caption = f"Using **{model_option}** | Retrieval: **Baseline (Cypher)**"
+    else:
+        method_caption = f"Using **{model_option}** | Retrieval: **{embedding_option}**"
+    st.caption(method_caption)
+
     try:
         with st.spinner(f"Generating response with {model_option}..."):
+            # Pass context based on retrieval method
+            baseline_ctx = valid_context if use_baseline else None
+            emb_model = embedding_model if use_embeddings else None
+
             answer_gemma, answer_mistral, answer_llama, eval_results = call_llm(
                 user_question,
-                baseline_context=valid_context,
-                embedding_model=embedding_model
+                baseline_context=baseline_ctx,
+                embedding_model=emb_model
             )
 
         # Select answer based on model choice

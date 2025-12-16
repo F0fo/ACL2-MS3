@@ -171,15 +171,15 @@ def process_query_for_baseline(user_query,driver):
 
 
 #################################### 2) EMBEDDING ###################################################################
-def build_shared_retriever(db_manager: Optional[DBManager] = None, embedding_model: str = 'feature'):
+def build_shared_retriever(db_manager: Optional[DBManager] = None, embedding_model: str = 'node2vec'):
     """
     Build the embedding retriever for LangChain.
 
     Args:
         db_manager: Database manager instance
-        embedding_model: 'feature' or 'node2vec'
-            - feature: 12-dim property-based embeddings (better for attribute queries)
-            - node2vec: 128-dim graph structure embeddings (better for relationship patterns)
+        embedding_model: 'node2vec' or 'fastrp'
+            - node2vec: 128-dim graph structure embeddings (random walks)
+            - fastrp: 128-dim fast random projection embeddings
     """
     try:
         # Create the unified hotel retriever with selected model type
@@ -203,10 +203,15 @@ def create_retrieval_qa_for_model(model, retriever, HF_TOKEN):
         token=HF_TOKEN
     )
 
-
     # Instantiate the wrapper
     llm = LangChainWrapper(client=client)
 
+    # If no retriever (baseline only), create a simple chain that just calls the LLM
+    if retriever is None:
+        from langchain.chains import LLMChain
+        from langchain.prompts import PromptTemplate
+        prompt = PromptTemplate(input_variables=["query"], template="{query}")
+        return LLMChain(llm=llm, prompt=prompt)
 
     # build rag qa using langchain
     qa_chain = RetrievalQA.from_chain_type(
@@ -371,14 +376,14 @@ def format_context_for_llm(context):
     return "\n".join(formatted) if formatted else "No relevant data found."
 
 
-def call_llm(query, baseline_context=None, embedding_model='feature'):
+def call_llm(query, baseline_context=None, embedding_model='node2vec'):
     """
     Call LLM with the query and context.
 
     Args:
         query: User's question
         baseline_context: Context from graph retrieval
-        embedding_model: 'feature' or 'node2vec' embedding model to use
+        embedding_model: 'node2vec', 'fastrp', or None (for baseline only)
     """
     db_manager = DBManager()
     HF_TOKEN = os.getenv("HUGGING_FACE_API_KEY")
@@ -411,7 +416,10 @@ Hotel information available:
 Respond naturally to the user's query using the hotel information above.'''
 
     #  -------------- 2) Build or reuse a shared retriever (embeddings + vectorstore). --------------
-    shared_retriever = build_shared_retriever(db_manager, embedding_model=embedding_model)
+    if embedding_model:
+        shared_retriever = build_shared_retriever(db_manager, embedding_model=embedding_model)
+    else:
+        shared_retriever = None  # Baseline only mode - no embeddings
 
     #  -------------- 3) Create a QA chain per model (these reuse shared_retriever) --------------
     gemma_qa = create_Gemma_llm(shared_retriever, HF_TOKEN)
