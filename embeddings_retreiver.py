@@ -856,6 +856,59 @@ class FeatureEmbeddingRetriever:
         print("  Mapper trained successfully")
         return True
 
+    # Synonym mappings for hotel name matching
+    NAME_SYNONYMS = {
+        'luxury': ['palace', 'grand', 'elite', 'royal', 'premium'],
+        'cozy': ['inn', 'boutique', 'retreat', 'lodge', 'house'],
+        'modern': ['elite', 'tower', 'heights'],
+        'traditional': ['grand', 'palace', 'royal'],
+        'beach': ['harbour', 'harbor', 'oasis', 'bay'],
+        'city': ['tower', 'heights', 'elite', 'mitte'],
+    }
+
+    # Attribute keywords mapped to feature properties
+    ATTRIBUTE_KEYWORDS = {
+        'clean': 'avg_cleanliness',
+        'cleanliness': 'avg_cleanliness',
+        'spotless': 'avg_cleanliness',
+        'comfortable': 'avg_comfort',
+        'comfort': 'avg_comfort',
+        'cozy': 'avg_comfort',
+        'facilities': 'avg_facilities',
+        'amenities': 'avg_facilities',
+        'equipped': 'avg_facilities',
+        'location': 'avg_location',
+        'central': 'avg_location',
+        'staff': 'avg_staff',
+        'service': 'avg_staff',
+        'friendly': 'avg_staff',
+        'value': 'avg_value',
+        'affordable': 'avg_value',
+        'worth': 'avg_value',
+    }
+
+    # Star rating keywords
+    STAR_KEYWORDS = {
+        'luxury': 5,
+        'luxurious': 5,
+        'premium': 5,
+        'five star': 5,
+        '5 star': 5,
+        '5-star': 5,
+        'high-end': 5,
+        'upscale': 5,
+        'mid-range': 4,
+        'four star': 4,
+        '4 star': 4,
+        '4-star': 4,
+        'budget': 3,
+        'cheap': 3,
+        'affordable': 3,
+        'three star': 3,
+        '3 star': 3,
+        '3-star': 3,
+    }
+
     def _get_location_filter(self, query_text):
         """
         Extract city/country names from query for location filtering.
@@ -888,32 +941,152 @@ class FeatureEmbeddingRetriever:
 
         return found_city, found_country
 
+    def _get_star_rating_filter(self, query_text):
+        """
+        Extract star rating preference from query.
+        Returns (min_stars, max_stars) tuple or (None, None) if not specified.
+        """
+        query_lower = query_text.lower()
+
+        # Check for star rating keywords (check multi-word first)
+        for keyword, stars in sorted(self.STAR_KEYWORDS.items(), key=lambda x: -len(x[0])):
+            if keyword in query_lower:
+                if stars == 5:
+                    return (5, 5)  # Luxury = exactly 5 stars
+                elif stars == 4:
+                    return (4, 5)  # Mid-range = 4-5 stars
+                elif stars == 3:
+                    return (3, 4)  # Budget = 3-4 stars
+        return (None, None)
+
+    def _get_attribute_boost(self, query_text, hotel_details):
+        """
+        Calculate boost based on attribute keywords in query.
+        If query mentions 'clean', boost hotels with high cleanliness scores.
+        Returns a multiplier (1.0 = no boost).
+        """
+        query_lower = query_text.lower()
+        boost = 1.0
+
+        for keyword, attribute in self.ATTRIBUTE_KEYWORDS.items():
+            if keyword in query_lower:
+                # Get the attribute value (e.g., avg_cleanliness)
+                attr_value = hotel_details.get(attribute.replace('avg_', ''), 0)
+                if attr_value is None:
+                    attr_value = 0
+
+                # Boost based on how high the attribute is (scale 0-10)
+                # Hotels with score >= 9 get 15% boost, >= 8 get 10% boost
+                if attr_value >= 9.0:
+                    boost *= 1.15
+                elif attr_value >= 8.5:
+                    boost *= 1.10
+                elif attr_value >= 8.0:
+                    boost *= 1.05
+
+        return boost
+
+    def _fuzzy_match(self, word1, word2, threshold=0.85):
+        """
+        Fuzzy matching for typo detection.
+        Returns True if words are similar enough (likely a typo).
+        """
+        if len(word1) < 4 or len(word2) < 4:
+            return word1 == word2
+
+        # Check if one is a near-complete substring of the other
+        # (handles cases like "azur" in "azure")
+        if len(word1) >= 4 and len(word2) >= 4:
+            if word1 in word2 and len(word1) >= len(word2) - 2:
+                return True
+            if word2 in word1 and len(word2) >= len(word1) - 2:
+                return True
+
+        # Require similar length (within 2 characters)
+        if abs(len(word1) - len(word2)) > 2:
+            return False
+
+        # Check prefix match (first 3 characters must match for typo detection)
+        if word1[:3] != word2[:3]:
+            return False
+
+        # Character-based similarity with stricter threshold
+        set1, set2 = set(word1), set(word2)
+        intersection = len(set1 & set2)
+        union = len(set1 | set2)
+        similarity = intersection / union if union > 0 else 0
+
+        return similarity >= threshold
+
     def _get_name_match_boost(self, query_text, hotel_name):
         """
         Calculate a boost score if query words match hotel name.
+        Includes:
+        - Direct word matching (20% per word)
+        - Synonym matching (15% per synonym)
+        - Multi-word phrase matching (extra 15% bonus)
+        - Fuzzy matching for typos (10% per fuzzy match)
         Returns a boost multiplier (1.0 = no boost, higher = boost).
         """
-        query_words = set(query_text.lower().split())
-        hotel_words = set(hotel_name.lower().replace("'", "").split())
+        query_lower = query_text.lower()
+        query_words = set(query_lower.split())
+        hotel_name_lower = hotel_name.lower().replace("'", "")
+        hotel_words = set(hotel_name_lower.split())
 
         # Remove common stop words
-        stop_words = {'the', 'a', 'an', 'in', 'at', 'for', 'with', 'and', 'or', 'hotel', 'hotels', 'good', 'best', 'top'}
-        query_words = query_words - stop_words
+        stop_words = {'the', 'a', 'an', 'in', 'at', 'for', 'with', 'and', 'or', 'hotel', 'hotels', 'good', 'best', 'top', 'great', 'nice'}
+        query_words_filtered = query_words - stop_words
 
-        # Check for matches
-        matches = query_words & hotel_words
+        boost = 1.0
+        match_reasons = []
 
-        if matches:
-            # Boost based on number of matching words
-            return 1.0 + (0.2 * len(matches))  # 20% boost per matching word
-        return 1.0
+        # 1. Direct word matching (20% per word)
+        direct_matches = query_words_filtered & hotel_words
+        if direct_matches:
+            boost += 0.2 * len(direct_matches)
+            match_reasons.append(f"direct:{','.join(direct_matches)}")
+
+        # 2. Multi-word phrase matching (extra 15% if 2+ consecutive words match)
+        for i in range(len(query_lower.split()) - 1):
+            phrase = ' '.join(query_lower.split()[i:i+2])
+            if phrase in hotel_name_lower:
+                boost += 0.15
+                match_reasons.append(f"phrase:{phrase}")
+                break  # Only count once
+
+        # 3. Synonym matching (15% per synonym match)
+        for query_word in query_words_filtered:
+            if query_word in self.NAME_SYNONYMS:
+                synonyms = self.NAME_SYNONYMS[query_word]
+                for synonym in synonyms:
+                    if synonym in hotel_words:
+                        boost += 0.15
+                        match_reasons.append(f"synonym:{query_word}->{synonym}")
+                        break  # Only count once per query word
+
+        # 4. Fuzzy matching for typos (15% per fuzzy match)
+        if not direct_matches:  # Only use fuzzy if no direct matches
+            for query_word in query_words_filtered:
+                if len(query_word) >= 4:  # Only fuzzy match longer words
+                    for hotel_word in hotel_words:
+                        if self._fuzzy_match(query_word, hotel_word):
+                            boost += 0.15
+                            match_reasons.append(f"fuzzy:{query_word}~{hotel_word}")
+                            break
+
+        if boost > 1.0:
+            return (boost, match_reasons)
+        return (1.0, [])
 
     def search_by_query(self, query_text, top_k=5):
         """
         Search for hotels using a natural language query.
-        - Extracts location (city/country) from query for filtering
-        - Boosts hotels whose names match query keywords
-        - Maps query text to feature space for similarity ranking
+        Features:
+        - Location filtering (city/country extraction)
+        - Star rating filtering (luxury/budget keywords)
+        - Name matching with synonyms and fuzzy matching
+        - Attribute boosting (clean, comfortable, etc.)
+        - Feature similarity ranking
         """
         print(f"\n [Feature] Searching by query: '{query_text}'")
 
@@ -931,12 +1104,17 @@ class FeatureEmbeddingRetriever:
                 print("  Failed to build mapper")
                 return []
 
-        # Extract location filter from query
+        # Extract filters from query
         filter_city, filter_country = self._get_location_filter(query_text)
+        min_stars, max_stars = self._get_star_rating_filter(query_text)
+
+        # Print active filters
         if filter_city:
             print(f"  Location filter: city = '{filter_city}'")
         elif filter_country:
             print(f"  Location filter: country = '{filter_country}'")
+        if min_stars:
+            print(f"  Star rating filter: {min_stars}-{max_stars} stars")
 
         # Encode query
         query_embedding = self.text_encoder.encode([query_text], show_progress_bar=False)
@@ -982,9 +1160,20 @@ class FeatureEmbeddingRetriever:
                 if filter_country and details['country'] != filter_country:
                     continue
 
-                # Apply name match boost
-                name_boost = self._get_name_match_boost(query_text, details['name'])
-                boosted_score = float(score) * name_boost
+                # Apply star rating filter
+                star_rating = details.get('star_rating', 0)
+                if min_stars and (star_rating < min_stars or star_rating > max_stars):
+                    continue
+
+                # Apply name match boost (now returns tuple)
+                name_boost, match_reasons = self._get_name_match_boost(query_text, details['name'])
+
+                # Apply attribute boost
+                attr_boost = self._get_attribute_boost(query_text, details)
+
+                # Combine boosts
+                total_boost = name_boost * attr_boost
+                boosted_score = float(score) * total_boost
 
                 results.append({
                     'hotel': details['name'],
@@ -994,6 +1183,8 @@ class FeatureEmbeddingRetriever:
                     'score': boosted_score,
                     'base_score': float(score),
                     'name_boost': name_boost,
+                    'attr_boost': attr_boost,
+                    'match_reasons': match_reasons,
                     'star_rating': details.get('star_rating'),
                     'review_count': details.get('review_count'),
                     'avg_score': details.get('avg_score'),
@@ -1129,9 +1320,16 @@ def main():
                     print(f"\n Search Results for: '{args.query}'")
                     print("-" * 70)
                     for i, r in enumerate(results, 1):
-                        boost_indicator = " [name match]" if r.get('name_boost', 1.0) > 1.0 else ""
-                        print(f"{i}. {r['hotel']} ({r['city']}, {r['country']}){boost_indicator}")
-                        print(f"   Score: {r['score']:.4f} | Stars: {r['star_rating']} | Reviews: {r['review_count']}")
+                        # Build boost indicators
+                        boosts = []
+                        if r.get('match_reasons'):
+                            boosts.extend([str(reason) for reason in r['match_reasons']])
+                        if r.get('attr_boost', 1.0) > 1.0:
+                            boosts.append(f"attr:{r['attr_boost']:.2f}x")
+
+                        boost_str = f" [{', '.join(boosts)}]" if boosts else ""
+                        print(f"{i}. {r['hotel']} ({r['city']}, {r['country']}){boost_str}")
+                        print(f"   Score: {r['score']:.4f} | Stars: {r['star_rating']:.0f} | Reviews: {r['review_count']}")
                         print(f"   Avg Score: {r['avg_score']:.1f} | Clean: {r['cleanliness']:.1f} | Comfort: {r['comfort']:.1f} | Facilities: {r['facilities']:.1f}")
                         print()
                 else:
