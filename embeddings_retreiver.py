@@ -909,6 +909,57 @@ class FeatureEmbeddingRetriever:
         '3-star': 3,
     }
 
+    # Ranking trigger words - when these appear, use attribute-based sorting
+    RANKING_TRIGGERS = ['best', 'top', 'highest', 'most', 'greatest', 'cleanest', 'nicest']
+
+    # Map attribute keywords to database property names for ranking queries
+    RANKING_ATTRIBUTES = {
+        'clean': 'avg_cleanliness',
+        'cleanliness': 'avg_cleanliness',
+        'cleanest': 'avg_cleanliness',
+        'comfortable': 'avg_comfort',
+        'comfort': 'avg_comfort',
+        'facilities': 'avg_facilities',
+        'amenities': 'avg_facilities',
+        'location': 'avg_location',
+        'located': 'avg_location',
+        'staff': 'avg_staff',
+        'service': 'avg_staff',
+        'value': 'avg_value',
+        'rating': 'avg_reviewer_score',
+        'rated': 'avg_reviewer_score',
+        'score': 'avg_reviewer_score',
+        'reviewed': 'review_count',
+        'reviews': 'review_count',
+        'popular': 'review_count',
+    }
+
+    def _get_ranking_attribute(self, query_text):
+        """
+        Detect if query is asking for ranking by a specific attribute.
+        Returns (attribute_name, db_property) or (None, None) if not a ranking query.
+
+        Examples:
+        - "best hotels in cleanliness" -> ('cleanliness', 'avg_cleanliness')
+        - "top rated hotels" -> ('rated', 'avg_reviewer_score')
+        - "most popular hotels" -> ('popular', 'review_count')
+        """
+        query_lower = query_text.lower()
+        words = query_lower.split()
+
+        # Check if any ranking trigger word is present
+        has_ranking_trigger = any(trigger in query_lower for trigger in self.RANKING_TRIGGERS)
+
+        if not has_ranking_trigger:
+            return (None, None)
+
+        # Find which attribute is being ranked
+        for attr_word, db_prop in self.RANKING_ATTRIBUTES.items():
+            if attr_word in words or attr_word in query_lower:
+                return (attr_word, db_prop)
+
+        return (None, None)
+
     def _get_location_filter(self, query_text):
         """
         Extract city/country names from query for location filtering.
@@ -970,8 +1021,11 @@ class FeatureEmbeddingRetriever:
 
         for keyword, attribute in self.ATTRIBUTE_KEYWORDS.items():
             if keyword in query_lower:
-                # Get the attribute value (e.g., avg_cleanliness)
-                attr_value = hotel_details.get(attribute.replace('avg_', ''), 0)
+                # Get the attribute value - try both with and without 'avg_' prefix
+                attr_value = hotel_details.get(attribute, 0)
+                if attr_value is None:
+                    # Try without avg_ prefix (for backwards compatibility)
+                    attr_value = hotel_details.get(attribute.replace('avg_', ''), 0)
                 if attr_value is None:
                     attr_value = 0
 
@@ -1082,6 +1136,7 @@ class FeatureEmbeddingRetriever:
         """
         Search for hotels using a natural language query.
         Features:
+        - Ranking queries (best/top in X -> sort by attribute)
         - Location filtering (city/country extraction)
         - Star rating filtering (luxury/budget keywords)
         - Name matching with synonyms and fuzzy matching
@@ -1104,11 +1159,16 @@ class FeatureEmbeddingRetriever:
                 print("  Failed to build mapper")
                 return []
 
+        # Check for ranking query (e.g., "best hotels in cleanliness")
+        ranking_attr, ranking_prop = self._get_ranking_attribute(query_text)
+
         # Extract filters from query
         filter_city, filter_country = self._get_location_filter(query_text)
         min_stars, max_stars = self._get_star_rating_filter(query_text)
 
         # Print active filters
+        if ranking_attr:
+            print(f"  Ranking by: {ranking_attr} ({ranking_prop})")
         if filter_city:
             print(f"  Location filter: city = '{filter_city}'")
         elif filter_country:
@@ -1140,8 +1200,9 @@ class FeatureEmbeddingRetriever:
                c.name as city, country.name as country,
                h.star_rating as star_rating, h.review_count as review_count,
                h.avg_reviewer_score as avg_score,
-               h.avg_cleanliness as cleanliness, h.avg_comfort as comfort,
-               h.avg_facilities as facilities
+               h.avg_cleanliness as avg_cleanliness, h.avg_comfort as avg_comfort,
+               h.avg_facilities as avg_facilities, h.avg_location as avg_location,
+               h.avg_staff as avg_staff, h.avg_value as avg_value
         """
 
         with self.driver.session() as session:
@@ -1175,6 +1236,11 @@ class FeatureEmbeddingRetriever:
                 total_boost = name_boost * attr_boost
                 boosted_score = float(score) * total_boost
 
+                # Get ranking value if this is a ranking query
+                ranking_value = None
+                if ranking_prop:
+                    ranking_value = details.get(ranking_prop, 0) or 0
+
                 results.append({
                     'hotel': details['name'],
                     'hotel_id': hotel_id,
@@ -1185,16 +1251,26 @@ class FeatureEmbeddingRetriever:
                     'name_boost': name_boost,
                     'attr_boost': attr_boost,
                     'match_reasons': match_reasons,
+                    'ranking_value': ranking_value,
+                    'ranking_attr': ranking_attr,
                     'star_rating': details.get('star_rating'),
                     'review_count': details.get('review_count'),
                     'avg_score': details.get('avg_score'),
-                    'cleanliness': details.get('cleanliness'),
-                    'comfort': details.get('comfort'),
-                    'facilities': details.get('facilities')
+                    'cleanliness': details.get('avg_cleanliness'),
+                    'comfort': details.get('avg_comfort'),
+                    'facilities': details.get('avg_facilities'),
+                    'location': details.get('avg_location'),
+                    'staff': details.get('avg_staff'),
+                    'value': details.get('avg_value')
                 })
 
-        # Re-sort by boosted score and limit to top_k
-        results.sort(key=lambda x: x['score'], reverse=True)
+        # Re-sort results
+        if ranking_prop:
+            # Ranking query: sort by the attribute value (e.g., "best in cleanliness" -> sort by cleanliness)
+            results.sort(key=lambda x: (x['ranking_value'] or 0), reverse=True)
+        else:
+            # Regular query: sort by boosted similarity score
+            results.sort(key=lambda x: x['score'], reverse=True)
         return results[:top_k]
 
     def setup_embeddings(self):
