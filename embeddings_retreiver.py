@@ -1239,6 +1239,400 @@ class FeatureEmbeddingRetriever:
 
 
 # ==============================================================================
+# UNIFIED RETRIEVER - BLACK BOX INTERFACE
+# ==============================================================================
+
+class HotelEmbeddingRetriever:
+    """
+    Unified Hotel Embedding Retriever - Black Box Interface
+
+    This class provides a single interface for hotel similarity search,
+    abstracting away the underlying embedding method (Node2Vec or Feature-based).
+
+    Usage:
+        # Create retriever with desired model
+        retriever = HotelEmbeddingRetriever(driver, model_type='feature')
+
+        # Search - works the same regardless of model
+        results = retriever.search_by_query("luxury hotel in Paris", top_k=5)
+        results = retriever.find_similar_hotels("The Azure Tower", top_k=5)
+
+    Model types:
+        - 'node2vec': Graph structure-based embeddings (128-dim)
+                      Finds hotels similar based on how they connect via reviews/travelers
+        - 'feature': Property-based embeddings (12-dim)
+                     Finds hotels similar based on ratings, scores, and computed review data
+                     Supports natural language query search with location/attribute filtering
+    """
+
+    VALID_MODELS = ['node2vec', 'feature']
+
+    def __init__(self, driver, model_type='feature', auto_initialize=True):
+        """
+        Initialize the unified retriever.
+
+        Args:
+            driver: Neo4j database driver
+            model_type: 'node2vec' or 'feature' (default: 'feature')
+            auto_initialize: If True, automatically loads existing index or sets up if needed
+        """
+        if model_type not in self.VALID_MODELS:
+            raise ValueError(f"Invalid model_type '{model_type}'. Must be one of: {self.VALID_MODELS}")
+
+        self.driver = driver
+        self._model_type = model_type
+        self._retriever = None
+        self._initialized = False
+
+        # Create the appropriate retriever
+        self._create_retriever()
+
+        # Auto-initialize if requested
+        if auto_initialize:
+            self._auto_initialize()
+
+    @property
+    def model_type(self):
+        """Get current model type"""
+        return self._model_type
+
+    @model_type.setter
+    def model_type(self, value):
+        """
+        Change the model type. This will switch to the new retriever.
+        Note: You may need to call initialize() after switching.
+        """
+        if value not in self.VALID_MODELS:
+            raise ValueError(f"Invalid model_type '{value}'. Must be one of: {self.VALID_MODELS}")
+
+        if value != self._model_type:
+            self._model_type = value
+            self._retriever = None
+            self._initialized = False
+            self._create_retriever()
+            self._auto_initialize()
+
+    def _create_retriever(self):
+        """Create the internal retriever based on model type"""
+        if self._model_type == 'node2vec':
+            self._retriever = EmbeddingRetriever(self.driver)
+        else:  # 'feature'
+            self._retriever = FeatureEmbeddingRetriever(self.driver)
+        print(f"  Retriever created: {self._model_type}")
+
+    def _auto_initialize(self):
+        """
+        Automatically initialize the retriever:
+        1. Try to load existing FAISS index
+        2. If not found, run full setup
+        """
+        print(f"\n Initializing {self._model_type} retriever...")
+
+        # Try to load existing index
+        if self._retriever.load_faiss_index():
+            print(f"  Loaded existing {self._model_type} index")
+            self._initialized = True
+
+            # For feature model, also build the text mapper if needed
+            if self._model_type == 'feature':
+                if not hasattr(self._retriever, 'text_to_feature_mapper') or self._retriever.text_to_feature_mapper is None:
+                    self._retriever.build_text_to_feature_mapper()
+            return True
+
+        # No existing index - check if embeddings exist in Neo4j
+        if self._retriever.verify_embeddings_exist():
+            # Embeddings exist, just build FAISS index
+            print(f"  Embeddings exist, building FAISS index...")
+            if self._retriever.build_faiss_index() if self._model_type == 'node2vec' else self._retriever.build_feature_embeddings():
+                self._retriever.save_faiss_index()
+                self._initialized = True
+
+                if self._model_type == 'feature':
+                    self._retriever.build_text_to_feature_mapper()
+                return True
+
+        # No embeddings - need full setup
+        print(f"  No existing embeddings found. Run setup_embeddings() to create them.")
+        self._initialized = False
+        return False
+
+    def setup_embeddings(self):
+        """
+        Run full embedding setup for the current model type.
+        This creates embeddings from scratch and builds the FAISS index.
+        """
+        success = self._retriever.setup_embeddings()
+        if success:
+            self._initialized = True
+
+            # For feature model, build text mapper
+            if self._model_type == 'feature':
+                self._retriever.build_text_to_feature_mapper()
+
+        return success
+
+    def is_initialized(self):
+        """Check if the retriever is ready for queries"""
+        return self._initialized and self._retriever.faiss_index is not None
+
+    def find_similar_hotels(self, hotel_name, top_k=5):
+        """
+        Find hotels similar to the given hotel.
+
+        Works with both model types:
+        - node2vec: Finds structurally similar hotels (same traveler patterns)
+        - feature: Finds hotels with similar properties (ratings, reviews)
+
+        Args:
+            hotel_name: Name of the reference hotel
+            top_k: Number of similar hotels to return
+
+        Returns:
+            List of dicts with hotel details and similarity scores
+        """
+        if not self.is_initialized():
+            print("  Retriever not initialized. Call setup_embeddings() first.")
+            return []
+
+        return self._retriever.find_similar_hotels(hotel_name, top_k=top_k)
+
+    def search_by_query(self, query_text, top_k=5):
+        """
+        Search for hotels using natural language query.
+
+        Features (available in both models, more advanced in 'feature'):
+        - Location filtering (city/country extraction)
+        - Star rating filtering (luxury/budget keywords)
+        - Name matching with synonyms and fuzzy matching
+        - Attribute boosting (clean, comfortable, etc.)
+
+        Args:
+            query_text: Natural language search query
+            top_k: Number of results to return
+
+        Returns:
+            List of dicts with hotel details and relevance scores
+        """
+        if not self.is_initialized():
+            print("  Retriever not initialized. Call setup_embeddings() first.")
+            return []
+
+        # Feature model has native query search
+        if self._model_type == 'feature':
+            return self._retriever.search_by_query(query_text, top_k=top_k)
+
+        # Node2Vec doesn't have query search - use fallback approach
+        # Try to find a hotel name in the query and use find_similar_hotels
+        print(f"  Note: query search with node2vec uses basic keyword matching")
+        return self._search_by_query_fallback(query_text, top_k)
+
+    def _search_by_query_fallback(self, query_text, top_k):
+        """
+        Fallback query search for Node2Vec model.
+        Performs basic keyword matching against hotel names and properties.
+        """
+        query_lower = query_text.lower()
+
+        # Get all hotels
+        query = """
+        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(country:Country)
+        RETURN h.hotel_id as hotel_id, h.name as name,
+               c.name as city, country.name as country,
+               h.star_rating as star_rating
+        """
+
+        with self.driver.session() as session:
+            records = session.run(query).data()
+
+        # Score hotels based on keyword matches
+        results = []
+        for record in records:
+            score = 0.0
+
+            # Location match
+            if record['city'].lower() in query_lower:
+                score += 0.5
+            if record['country'].lower() in query_lower:
+                score += 0.3
+
+            # Name match
+            name_lower = record['name'].lower()
+            for word in query_lower.split():
+                if len(word) > 3 and word in name_lower:
+                    score += 0.2
+
+            if score > 0:
+                results.append({
+                    'hotel': record['name'],
+                    'hotel_id': record['hotel_id'],
+                    'city': record['city'],
+                    'country': record['country'],
+                    'score': score,
+                    'star_rating': record.get('star_rating')
+                })
+
+        # Sort by score
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return results[:top_k]
+
+    def get_random_hotel(self):
+        """Get a random hotel from the database"""
+        return self._retriever.get_random_hotel()
+
+    def verify_embeddings_exist(self):
+        """Check if embeddings have been created"""
+        return self._retriever.verify_embeddings_exist()
+
+    def get_model_info(self):
+        """Get information about the current model"""
+        if self._model_type == 'node2vec':
+            return {
+                'model_type': 'node2vec',
+                'description': 'Graph structure-based embeddings',
+                'embedding_dim': 128,
+                'features': ['find_similar_hotels', 'basic_query_search'],
+                'best_for': 'Finding hotels with similar traveler patterns'
+            }
+        else:
+            return {
+                'model_type': 'feature',
+                'description': 'Property-based embeddings with enriched hotel data',
+                'embedding_dim': 12,
+                'features': ['find_similar_hotels', 'advanced_query_search',
+                            'location_filtering', 'star_rating_filtering',
+                            'attribute_boosting', 'synonym_matching', 'fuzzy_matching'],
+                'best_for': 'Natural language hotel search with filtering'
+            }
+
+
+# ==============================================================================
+# SIMPLE FUNCTION INTERFACE FOR EXTERNAL SCRIPTS
+# ==============================================================================
+
+# Global retriever instance (lazy loaded)
+_global_retriever = None
+_global_model_type = 'feature'  # Default model
+
+
+def set_model_type(model_type):
+    """
+    Set the global model type for subsequent searches.
+
+    Args:
+        model_type: 'node2vec' or 'feature'
+    """
+    global _global_model_type, _global_retriever
+    if model_type not in ['node2vec', 'feature']:
+        raise ValueError(f"Invalid model_type. Must be 'node2vec' or 'feature'")
+
+    if model_type != _global_model_type:
+        _global_model_type = model_type
+        _global_retriever = None  # Force re-initialization
+
+
+def get_model_type():
+    """Get the current global model type"""
+    return _global_model_type
+
+
+def _get_retriever():
+    """Get or create the global retriever instance"""
+    global _global_retriever
+    if _global_retriever is None:
+        db_manager = DBManager()
+        _global_retriever = HotelEmbeddingRetriever(
+            db_manager.driver,
+            model_type=_global_model_type,
+            auto_initialize=True
+        )
+    return _global_retriever
+
+
+def search_hotels(query, top_k=5):
+    """
+    Search for hotels using natural language query.
+
+    This is the main entry point for external scripts.
+    Uses the globally configured model type.
+
+    Args:
+        query: Natural language search query (e.g., "luxury hotel in Paris")
+        top_k: Number of results to return
+
+    Returns:
+        List of hotel results with scores
+
+    Example:
+        from embeddings_retreiver import search_hotels, set_model_type
+
+        # Use feature-based search (default)
+        results = search_hotels("clean comfortable hotel in Tokyo")
+
+        # Switch to node2vec
+        set_model_type('node2vec')
+        results = search_hotels("hotel near beach")
+    """
+    retriever = _get_retriever()
+    return retriever.search_by_query(query, top_k=top_k)
+
+
+def find_similar(hotel_name, top_k=5):
+    """
+    Find hotels similar to the given hotel.
+
+    Args:
+        hotel_name: Name of the reference hotel
+        top_k: Number of similar hotels to return
+
+    Returns:
+        List of similar hotels with scores
+
+    Example:
+        from embeddings_retreiver import find_similar
+
+        results = find_similar("The Azure Tower", top_k=10)
+    """
+    retriever = _get_retriever()
+    return retriever.find_similar_hotels(hotel_name, top_k=top_k)
+
+
+def setup_embeddings():
+    """
+    Run embedding setup for the current model type.
+    Call this if embeddings haven't been created yet.
+
+    Returns:
+        True if setup succeeded, False otherwise
+    """
+    retriever = _get_retriever()
+    return retriever.setup_embeddings()
+
+
+def get_retriever(model_type='feature', driver=None):
+    """
+    Get a retriever instance for custom usage.
+
+    Args:
+        model_type: 'node2vec' or 'feature'
+        driver: Neo4j driver (optional, will create one if not provided)
+
+    Returns:
+        HotelEmbeddingRetriever instance
+
+    Example:
+        from embeddings_retreiver import get_retriever
+
+        retriever = get_retriever('feature')
+        results = retriever.search_by_query("luxury hotel")
+    """
+    if driver is None:
+        db_manager = DBManager()
+        driver = db_manager.driver
+
+    return HotelEmbeddingRetriever(driver, model_type=model_type, auto_initialize=True)
+
+
+# ==============================================================================
 # MAIN EXECUTION
 # ==============================================================================
 
@@ -1247,11 +1641,11 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description='Hotel Similarity using Graph Embeddings')
-    parser.add_argument('--method', type=str, default='node2vec', choices=['node2vec', 'feature'],
+    parser.add_argument('--method', type=str, default='feature', choices=['node2vec', 'feature'],
                         help='Embedding method: node2vec (graph structure) or feature (enriched properties)')
     parser.add_argument('--setup', action='store_true', help='Setup embeddings')
     parser.add_argument('--hotel', type=str, help='Hotel name to find similar hotels for')
-    parser.add_argument('--query', type=str, help='Natural language query to search hotels (feature method only)')
+    parser.add_argument('--query', type=str, help='Natural language query to search hotels')
     parser.add_argument('--top-k', type=int, default=5, help='Number of similar hotels to return')
     parser.add_argument('--random', action='store_true', help='Find similar hotels for a random hotel')
     parser.add_argument('--compare', action='store_true', help='Compare Node2Vec vs Feature embedding results')
@@ -1262,13 +1656,14 @@ def main():
         print("Connecting to Neo4j...")
         db_manager = DBManager()
 
-        # Select retriever based on method
-        if args.method == 'feature':
-            retriever = FeatureEmbeddingRetriever(db_manager.driver)
-            print("  Using: Feature Embedding (enriched properties)")
-        else:
-            retriever = EmbeddingRetriever(db_manager.driver)
-            print("  Using: Node2Vec (graph structure)")
+        # Use unified retriever (black box interface)
+        retriever = HotelEmbeddingRetriever(
+            db_manager.driver,
+            model_type=args.method,
+            auto_initialize=not args.setup  # Don't auto-init if we're doing setup
+        )
+        info = retriever.get_model_info()
+        print(f"  Using: {info['model_type']} ({info['description']})")
 
         # Setup embeddings
         if args.setup:
@@ -1308,32 +1703,33 @@ def main():
             else:
                 print(f" No similar hotels found for '{hotel_name}'")
 
-        # Search by query (feature method only)
+        # Search by query (unified interface - works with both models)
         if args.query:
-            if args.method != 'feature':
-                print("\n Query search is only available with --method feature")
-                print("  Usage: python embeddings_retreiver.py --query 'your query' --method feature")
+            results = retriever.search_by_query(args.query, top_k=args.top_k)
+
+            if results:
+                print(f"\n Search Results for: '{args.query}'")
+                print("-" * 70)
+                for i, r in enumerate(results, 1):
+                    # Build boost indicators (only available in feature model)
+                    boosts = []
+                    if r.get('match_reasons'):
+                        boosts.extend([str(reason) for reason in r['match_reasons']])
+                    if r.get('attr_boost', 1.0) > 1.0:
+                        boosts.append(f"attr:{r['attr_boost']:.2f}x")
+
+                    boost_str = f" [{', '.join(boosts)}]" if boosts else ""
+                    city = r.get('city', 'N/A')
+                    country = r.get('country', 'N/A')
+                    print(f"{i}. {r['hotel']} ({city}, {country}){boost_str}")
+                    print(f"   Score: {r['score']:.4f} | Stars: {r.get('star_rating', 'N/A')}")
+
+                    # Extra details for feature model
+                    if r.get('avg_score') is not None:
+                        print(f"   Avg Score: {r['avg_score']:.1f} | Clean: {r.get('cleanliness', 0):.1f} | Comfort: {r.get('comfort', 0):.1f}")
+                    print()
             else:
-                results = retriever.search_by_query(args.query, top_k=args.top_k)
-
-                if results:
-                    print(f"\n Search Results for: '{args.query}'")
-                    print("-" * 70)
-                    for i, r in enumerate(results, 1):
-                        # Build boost indicators
-                        boosts = []
-                        if r.get('match_reasons'):
-                            boosts.extend([str(reason) for reason in r['match_reasons']])
-                        if r.get('attr_boost', 1.0) > 1.0:
-                            boosts.append(f"attr:{r['attr_boost']:.2f}x")
-
-                        boost_str = f" [{', '.join(boosts)}]" if boosts else ""
-                        print(f"{i}. {r['hotel']} ({r['city']}, {r['country']}){boost_str}")
-                        print(f"   Score: {r['score']:.4f} | Stars: {r['star_rating']:.0f} | Reviews: {r['review_count']}")
-                        print(f"   Avg Score: {r['avg_score']:.1f} | Clean: {r['cleanliness']:.1f} | Comfort: {r['comfort']:.1f} | Facilities: {r['facilities']:.1f}")
-                        print()
-                else:
-                    print(f" No results found for query: '{args.query}'")
+                print(f" No results found for query: '{args.query}'")
 
         # Compare both methods
         if args.compare:
@@ -1341,22 +1737,22 @@ def main():
             print("COMPARING NODE2VEC vs FEATURE EMBEDDINGS")
             print("="*70)
 
-            # Get a hotel to compare
-            n2v = EmbeddingRetriever(db_manager.driver)
-            feat = FeatureEmbeddingRetriever(db_manager.driver)
+            # Use unified retrievers for both methods
+            n2v = HotelEmbeddingRetriever(db_manager.driver, model_type='node2vec', auto_initialize=True)
+            feat = HotelEmbeddingRetriever(db_manager.driver, model_type='feature', auto_initialize=True)
 
             hotel_name = None
-            if n2v.load_faiss_index():
-                hotel_name, _ = n2v.get_random_hotel()
-            if not hotel_name and feat.load_faiss_index():
+            if feat.is_initialized():
                 hotel_name, _ = feat.get_random_hotel()
+            if not hotel_name and n2v.is_initialized():
+                hotel_name, _ = n2v.get_random_hotel()
 
             if hotel_name:
                 print(f"\nQuery Hotel: {hotel_name}")
                 top_k = args.top_k
 
                 print(f"\n--- NODE2VEC Results (graph structure) ---")
-                if n2v.faiss_index:
+                if n2v.is_initialized():
                     results = n2v.find_similar_hotels(hotel_name, top_k=top_k)
                     for i, r in enumerate(results, 1):
                         print(f"  {i}. {r['hotel']} (score: {r['score']:.4f})")
@@ -1364,7 +1760,7 @@ def main():
                     print("  Run --setup --method node2vec first")
 
                 print(f"\n--- FEATURE Results (enriched properties) ---")
-                if feat.load_faiss_index():
+                if feat.is_initialized():
                     results = feat.find_similar_hotels(hotel_name, top_k=top_k)
                     for i, r in enumerate(results, 1):
                         print(f"  {i}. {r['hotel']} (score: {r['score']:.4f})")
@@ -1379,24 +1775,49 @@ def main():
 
         elif not args.setup and not args.hotel and not args.random and not args.query:
             parser.print_help()
-            print("\nExamples:")
-            print("  # Setup Node2Vec (graph structure)")
+            print("\n" + "="*70)
+            print("USAGE EXAMPLES")
+            print("="*70)
+            print("\n  CLI Usage:")
+            print("  -----------")
+            print("  # Setup Feature Embedding (default, recommended)")
             print("  python embeddings_retreiver.py --setup")
             print()
-            print("  # Setup Feature Embedding (enriched properties)")
-            print("  python embeddings_retreiver.py --setup --method feature")
+            print("  # Setup Node2Vec (graph structure)")
+            print("  python embeddings_retreiver.py --setup --method node2vec")
             print()
-            print("  # Find similar by hotel name (Node2Vec)")
+            print("  # Search by natural language query")
+            print("  python embeddings_retreiver.py --query 'luxury hotel in Paris'")
+            print()
+            print("  # Find similar hotels")
             print("  python embeddings_retreiver.py --hotel 'The Azure Tower'")
-            print()
-            print("  # Find similar by hotel name (Feature)")
-            print("  python embeddings_retreiver.py --hotel 'The Azure Tower' --method feature")
-            print()
-            print("  # Search by natural language query (Feature only)")
-            print("  python embeddings_retreiver.py --query 'luxury hotel with good facilities' --method feature")
             print()
             print("  # Compare both methods")
             print("  python embeddings_retreiver.py --compare")
+            print()
+            print("\n  External Script Usage (Black Box Interface):")
+            print("  -----------------------------------------------")
+            print("  # Simple function interface:")
+            print("  from embeddings_retreiver import search_hotels, find_similar, set_model_type")
+            print()
+            print("  results = search_hotels('luxury hotel in Paris')  # Uses feature model by default")
+            print("  results = find_similar('The Azure Tower')")
+            print()
+            print("  set_model_type('node2vec')  # Switch to node2vec model")
+            print("  results = search_hotels('beach hotel')")
+            print()
+            print("\n  # Class interface (more control):")
+            print("  from embeddings_retreiver import HotelEmbeddingRetriever")
+            print("  from db_manager import DBManager")
+            print()
+            print("  db = DBManager()")
+            print("  retriever = HotelEmbeddingRetriever(db.driver, model_type='feature')")
+            print("  results = retriever.search_by_query('clean comfortable hotel')")
+            print()
+            print("  # Switch model at runtime:")
+            print("  retriever.model_type = 'node2vec'")
+            print("  results = retriever.find_similar_hotels('Grand Hotel')")
+            print("="*70)
 
         db_manager.close()
 
