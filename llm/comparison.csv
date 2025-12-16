@@ -1,0 +1,89 @@
+model,latency_sec,input_tokens,output_tokens,total_tokens,input_cost_usd,output_cost_usd,total_cost_usd,semantic_accuracy,response
+Gemma-2-2B,3.236,11,539,550,1e-06,0.000108,0.000109,0.67,"Here's a breakdown of what should be included in Milestone 1 of your report, based on the provided context:
+
+**Milestone 1 Report Structure**
+
+* **Introduction:**
+    * Briefly state the project's goal and the overall objective.
+    * Mention the dataset used and its characteristics.
+    * Briefly outline the key steps and methodologies you'll be using.
+
+* **Data Preprocessing and Feature Engineering:**
+    * **Data Cleaning:** Describe the steps taken to clean the data (e.g., handling missing values, removing outliers, dealing with duplicates). Include visualizations (e.g., histograms, box plots) to show the impact of cleaning on the data distribution.
+    * **Feature Engineering:** Explain the features you created and why you chose them. Provide visualizations (e.g., scatter plots, correlation matrices) to show the relationships between features.
+    * **Data Transformation:**  Explain the log transformation you chose and why. Include a plot showing the distribution of the transformed data.
+
+* **Model Selection and Training:**
+    * **Model Choice:** Describe the model you selected (e.g., linear regression, decision tree, etc.). Justify your choice based on the dataset characteristics and the task.
+    * **Training Process:**  Outline the training process (e.g., splitting the data into training and validation sets, hyperparameter tuning, cross-validation).
+    * **Training Performance:** Report the performance metrics (e.g., accuracy, precision, recall, F1-score) on the training and validation sets. Include a plot showing the training and validation performance curves.
+    * **Baseline:**  Include a baseline performance (e.g., a simple model or a random guess) for comparison.
+
+* **Evaluation Metrics:**
+    * **Evaluation Metrics:**  Explain the metrics you'll use to evaluate the model's performance on unseen data (e.g., accuracy, precision, recall, F1-score, AUC).
+    * **Evaluation Results:**  Present the results of the evaluation on the unseen test data. Include a plot showing the performance of the model on the test set.
+
+* **Limitations and Future Work:**
+    * **Limitations:**  Acknowledge any limitations of your approach or the data.
+    * **Future Work:**  Suggest potential improvements or directions for future research.
+
+**Key Points for Milestone 1**
+
+* **Clarity and"
+Mistral-7B,12.063,11,305,316,2e-06,0.000183,0.000185,0.582," For Milestone 1 of the project report, the following components should be included:
+
+1. Description of the actual deliverables and requirements.
+2. Key dates and logistics, including when MS1 evaluation will be scheduled and how to reserve a slot.
+3. Data cleaning:
+   * Plots of results.
+   * Answers to data engineering questions.
+   * Clear markdown explanations justifying choices.
+4. Feature selection:
+   * Reason for chosen features.
+   * Plotting the effect of features.
+5. Data pre-processing and feature engineering:
+   * Understanding the step and its need.
+   * Effect on the step on the data distribution.
+6. Limitation reporting:
+   * Performance throughout training and validation.
+   * Performance on unseen test data.
+7. Inference function:
+   * Global and local explanations.
+   * Plotting and explaining the explanations.
+
+Additionally, any steps performed during data cleaning, data analysis, feature selection, and data pre-processing should follow a logical order and include clear markdown explanations that justify choices. All plots, results from data engineering questions, and reasoning/justification must be included.
+
+When making changes, such as applying a log transform, report the EDA results that led you there and provide clear baselines (before and after results) and explanations of how the added step improved or worsened performance.
+
+When trying to improve performance, investigate more than one approach, such as different features, preprocessing pipelines, models, and hyperparameters, and report comparative results.
+
+Finally, include a baseline requirement for architecture choices in the notebook."
+LLaMA-3.1-8B,6.974,11,532,543,3e-06,0.000426,0.000429,0.596,"Based on the provided context, the following should be included in the report for Milestone 1:
+
+1. **Data Cleaning**: Explain and justify the steps taken for data cleaning, including any decisions made and the reasoning behind them. Include plots and numbers to support the explanation.
+2. **Data Analysis**: Describe the analysis performed on the data, including any insights gained and the methods used to analyze the data.
+3. **Plotting the results**: Include plots to visualize the results of the analysis.
+4. **Answering Data Engineering Questions**: Answer any data engineering questions, including the reasoning and justification for the answers.
+5. **Plotting the results**: Include plots to visualize the results of the data engineering questions.
+6. **Feature Selection**: Explain and justify the chosen features, including the reasoning behind the selection and evidence to support the choice.
+7. **Plotting the effect of the features**: Include plots to visualize the effect of the chosen features.
+8. **Data Pre-processing and Feature Engineering**: Explain and justify the steps taken for data pre-processing and feature engineering, including any decisions made and the reasoning behind them.
+9. **Prediction Model**: Describe the chosen prediction model, including how it works and its limitations.
+10. **Reporting its performance**: Report the performance of the model throughout training and validation, as well as on the unseen test data.
+11. **Plotting the reports**: Include plots to visualize the reports.
+12. **Inference Function**: Describe the inference function, including how it works and any limitations.
+13. **XAI (Explainable AI)**: Describe the XAI approach used, including how it works and any limitations.
+14. **Global Explanation**: Describe the global explanation approach used, including how it works and any limitations.
+15. **Local Explanation**: Describe the local explanation approach used, including how it works and any limitations.
+16. **Plotting and explaining the explanations**: Include plots to visualize the explanations and explain the reasoning behind the explanations.
+
+Additionally, the report should include:
+
+* A clear and logical order of steps
+* Markdown explanations that justify choices
+* All plots and data engineering answers included
+* A clear description of the actual deliverables and requirements
+* A comparison of multiple approaches (if applicable)
+* A baseline requirement for architecture choices
+
+Note that this is not an exhaustive list, and you should include any other relevant information that is specific to your project."
