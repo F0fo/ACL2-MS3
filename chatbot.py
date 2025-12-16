@@ -405,7 +405,7 @@ Guidelines:
 - Address the user respectfully as 'sir' at least once in your response
 - Be conversational and natural, as if having a pleasant discussion
 - Provide specific details from the data without mentioning "the data" or "the context"
-- If recommending hotels, explain WHY they would be good choices
+- If recommending hotels display ranked recommendations with explanations. Show why certain entities were recommended based on user preferences and KG data 
 - Keep responses concise but informative
 
 User's query: {query}
