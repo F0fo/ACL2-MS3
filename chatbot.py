@@ -456,8 +456,9 @@ Respond naturally to the user's query using the hotel information above.'''
 
 
     REFERENCE_ANSWER = """
-    Milestone 1 report should include problem definition, dataset description,
-    related work, methodology, and preliminary results.
+    There's the Canal House Grand in Amsterdam, 
+    which has a very high average score for comfort and cleanliness, 
+    and a fantastic location.
     """
 
     comparsion_gemma = evaluate_model(

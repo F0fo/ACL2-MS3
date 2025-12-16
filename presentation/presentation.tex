@@ -1,4 +1,4 @@
-\documentclass[aspectratio=169]{beamer}
+﻿\documentclass[aspectratio=169]{beamer}
 \usetheme{Madrid}
 \usecolortheme{whale}
 
@@ -24,8 +24,11 @@
 }
 
 \title{Hotel Recommendation Chatbot}
-\subtitle{Graph-Based RAG System with Multi-Model Integration}
-\author{Team Name}
+\subtitle{J.A.R.V.I.S.}
+\author{
+    \textbf{Team 42}\\[0.3cm]
+    Omar Fouad \quad Jana Elewainy \quad Yara Tantawy \quad Ziad Elgendy
+}
 \date{\today}
 
 \begin{document}
@@ -65,8 +68,8 @@
     % LLM
     \node[block, right=of context, fill=red!30] (llm) {LLM\\Layer};
 
-    % Output
-    \node[block, right=of llm, fill=green!30] (output) {Response};
+    % Output - below LLM instead of to the right
+    \node[block, below=0.8cm of llm, fill=green!30] (output) {Response};
 
     % Arrows
     \draw[arrow] (input) -- (intent);
@@ -85,9 +88,8 @@
 \end{center}
 
 \vspace{0.3cm}
-\textbf{Task:} Hotel Recommendation Chatbot
+\textbf{Task:} Hotel Recommender: J.A.R.V.I.S.
 
-\textbf{Dataset:} Custom hotel reviews dataset (hotels, users, reviews)
 \end{frame}
 
 %==============================================================================
@@ -130,15 +132,16 @@
 \textbf{Classification Examples:}
 
 \vspace{0.2cm}
-\begin{tabular}{|p{4cm}|l|}
+\scriptsize
+\begin{tabular}{|p{3.2cm}|l|}
 \hline
 \textbf{Query} & \textbf{Intent} \\
 \hline
-``Recommend me a hotel in Tokyo'' & hotel\_rec (0.97) \\
+``Recommend hotel in Tokyo'' & hotel\_rec (0.97) \\
 \hline
 ``Do I need visa from India?'' & visa\_query (0.89) \\
 \hline
-``Compare Azure Tower and Marina'' & comparison (0.94) \\
+``Compare Azure and Marina'' & comparison (0.94) \\
 \hline
 ``Best for business travelers'' & traveller\_pref (0.91) \\
 \hline
@@ -152,61 +155,121 @@
 %------------------------------------------------------------------------------
 \begin{frame}{Entity Extraction}
 \begin{columns}
-\begin{column}{0.45\textwidth}
-\textbf{Approach:} Utiize NER library dataset keyword lookups
+\begin{column}{0.4\textwidth}
+\textbf{Approach:} spaCy NER + keyword lookups
 
 \vspace{0.2cm}
 \textbf{Entity Types Extracted:}
 \begin{itemize}
+    \scriptsize
     \item \textbf{Hotels} - FAC, ORG labels + lookup
     \item \textbf{Cities/Countries} - GPE label
-    \item \textbf{Traveller Types} - Lookup
-    \item \textbf{Demographics (Gender + Age)} - Lookup + DATE lable
-    \item \textbf{Ratings} - Lookup
+    \item \textbf{Traveller Types} - Keyword lookup
+    \item \textbf{Demographics} - Lookup + DATE
+    \item \textbf{Ratings} - Numeric extraction
 \end{itemize}
 
 \vspace{0.2cm}
-\textbf{Keyword Example:}
+\textbf{Keyword Mappings:}
 \begin{itemize}
     \scriptsize
     \item solo, alone $\rightarrow$ ``Solo''
-    \item business, corporate $\rightarrow$ ``Business''
-    \item hygiene, cleanliness $\rightarrow$ cleanliness\_base
-    \item senior, older $\rightarrow$ age\_group ``55+''
+    \item business $\rightarrow$ ``Business''
+    \item cleanliness $\rightarrow$ cleanliness\_base
+    \item senior $\rightarrow$ age ``55+''
 \end{itemize}
 \end{column}
 
-\begin{column}{0.55\textwidth}
+\begin{column}{0.6\textwidth}
 \textbf{Extraction Examples:}
+\scriptsize
 
-\vspace{0.2cm}
-\footnotesize
-\texttt{Query: ``Best hotels for solo female in Paris''}
+\vspace{0.1cm}
+\texttt{``Best hotels for solo female in Paris''}
 \begin{itemize}
     \scriptsize
-    \item cities: [``Paris'']
-    \item traveller\_types: [``Solo'']
-    \item demographics: [``Female'']
+    \item cities: [``Paris''], traveller\_types: [``Solo''], demographics: [``Female'']
 \end{itemize}
 
-\vspace{0.2cm}
-\texttt{Query: ``Hotels with cleanliness above 9''}
+\vspace{0.1cm}
+\texttt{``Hotels with cleanliness above 9''}
 \begin{itemize}
     \scriptsize
     \item cleanliness\_base: 9.0
-    \item comfort\_base: None
-    \item facilities\_base: None
 \end{itemize}
 
-\vspace{0.2cm}
-\texttt{Query: ``Compare Azure Tower and Marina Bay''}
+\vspace{0.1cm}
+\texttt{``Compare Azure Tower and Marina Bay''}
 \begin{itemize}
     \scriptsize
     \item hotels: [``The Azure Tower'', ``Marina Bay'']
 \end{itemize}
+
+\vspace{0.1cm}
+\texttt{``Hotels recommended for seniors''}
+\begin{itemize}
+    \scriptsize
+    \item demographics: [``55+'']
+\end{itemize}
 \end{column}
 \end{columns}
 \end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Input Embedding}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\textbf{Query-to-Embedding Flow:}
+\vspace{0.2cm}
+
+\begin{center}
+\begin{tikzpicture}[node distance=0.35cm, scale=0.75, transform shape,
+    ebox/.style={rectangle, draw, fill=blue!20, text width=3.2cm, text centered, minimum height=0.55cm, rounded corners, font=\scriptsize}]
+
+    \node[ebox, fill=green!30] (q1) {User Query};
+    \node[ebox, below=of q1] (q2) {Entity Extraction};
+    \node[ebox, below=of q2] (q3) {Hotel Name Found?};
+    \node[ebox, below=of q3, fill=purple!20] (q4) {Lookup Graph Embedding};
+    \node[ebox, below=of q4, fill=orange!20] (q5) {FAISS k-NN Search};
+    \node[ebox, below=of q5, fill=yellow!30] (q6) {Ranked Hotels};
+
+    \draw[->, thick] (q1) -- (q2);
+    \draw[->, thick] (q2) -- (q3);
+    \draw[->, thick] (q3) -- (q4);
+    \draw[->, thick] (q4) -- (q5);
+    \draw[->, thick] (q5) -- (q6);
+\end{tikzpicture}
+\end{center}
+
+\end{column}
+
+\begin{column}{0.5\textwidth}
+\textbf{Key Insight:}
+\begin{itemize}
+    \scriptsize
+    \item Graph embeddings encode structure, not text
+    \item Query $\rightarrow$ Hotel $\rightarrow$ Embedding $\rightarrow$ FAISS
+    \item Pre-computed embeddings stored in Neo4j
+    \item Cosine similarity via FAISS IndexFlatIP
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{Embedding Models:}
+\begin{itemize}
+    \scriptsize
+    \item Node2Vec (128-dim) - Random walks
+    \item FastRP (128-dim) - Random projection
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{Function:}
+
+\scriptsize
+\texttt{search\_by\_query(query\_text, top\_k=5)}
+\end{column}
+\end{columns}
+\end{frame}
+
 %==============================================================================
 %  ERROR ANALYSIS & IMPROVEMENTS
 %==============================================================================
@@ -227,70 +290,11 @@
 \textbf{Entity Extraction:}
 \begin{itemize}
     \setlength{\itemsep}{0.2em}
-    \item Hotel names with special characters missed (L'Étoile)
-    \item Some relies on predefined keyword lists (not adaptive)
+    \item Hotel names with special characters missed (L'Ã‰toile)
+    \item Relies on predefined keyword lists (not adaptive)
     \item spaCy NER misses domain-specific entities
     \item No coreference resolution (``that hotel'')
 \end{itemize}
-\end{frame}
-%------------------------------------------------------------------------------
-\begin{frame}{Query Processing for Embeddings}
-\begin{columns}
-\begin{column}{0.5\textwidth}
-\textbf{Query-to-Embedding Flow:}
-
-\begin{enumerate}
-    \item User query received
-    \item Entity extraction (hotel names, cities)
-    \item If hotel name found $\rightarrow$ similarity search
-    \item Retrieve hotel's embedding from FAISS
-    \item Find k-nearest neighbors
-    \item Return ranked similar hotels
-\end{enumerate}
-
-\vspace{0.3cm}
-\textbf{Fallback for No Hotel Name:}
-\begin{itemize}
-    \scriptsize
-    \item Keyword matching on city/country
-    \item Use first result from KG context
-    \item Basic text similarity scoring
-\end{itemize}
-\end{column}
-
-\begin{column}{0.5\textwidth}
-\textbf{FAISS Similarity Search:}
-
-\vspace{0.2cm}
-\begin{tikzpicture}[scale=0.7]
-    \node[draw, rectangle, fill=blue!20, font=\scriptsize, text width=1.5cm, align=center] (q) at (0,0) {Hotel Name};
-    \node[draw, rectangle, fill=green!20, font=\scriptsize, text width=1.5cm, align=center] (e) at (2.5,0) {Get Embedding};
-    \node[draw, rectangle, fill=yellow!20, font=\scriptsize, text width=1.5cm, align=center] (m) at (5,0) {FAISS Search};
-    \node[draw, rectangle, fill=orange!20, font=\scriptsize, text width=1.5cm, align=center] (f) at (7.5,0) {Top-K Hotels};
-    \draw[->, thick] (q) -- (e);
-    \draw[->, thick] (e) -- (m);
-    \draw[->, thick] (m) -- (f);
-\end{tikzpicture}
-
-\vspace{0.3cm}
-\textbf{Index Structure:}
-\begin{itemize}
-    \scriptsize
-    \item Normalized L2 embeddings
-    \item IndexFlatIP (Inner Product)
-    \item Cosine similarity after normalization
-    \item Separate index per model (Node2Vec/FastRP)
-\end{itemize}
-
-\vspace{0.2cm}
-\textbf{Storage:}
-\begin{itemize}
-    \scriptsize
-    \item Neo4j: node2vecEmbedding, fastRPEmbedding
-    \item FAISS: faiss\_hotel\_index.bin, faiss\_hotel\_fastrp\_index.bin
-\end{itemize}
-\end{column}
-\end{columns}
 \end{frame}
 
 %==============================================================================
@@ -298,64 +302,36 @@
 %==============================================================================
 \section{Graph Retrieval - Baseline}
 
-\begin{frame}{Knowledge Graph Schema - Complete Overview}
-\begin{columns}
-\begin{column}{0.55\textwidth}
-\textbf{Node Types \& Properties:}
+\begin{frame}{Baseline Retrieval Pipeline}
+\begin{center}
+\begin{tikzpicture}[node distance=0.35cm, scale=0.65, transform shape,
+    sbox/.style={rectangle, draw, fill=blue!20, text width=3cm, text centered, minimum height=0.5cm, rounded corners, font=\scriptsize}]
 
-\vspace{0.2cm}
+    \node[sbox, fill=green!30] (s1) {1. User Query};
+    \node[sbox, below=of s1] (s2) {2. Intent Classification};
+    \node[sbox, below=of s2] (s3) {3. Entity Extraction};
+    \node[sbox, below=of s3] (s4) {4. Cypher Parameters};
+    \node[sbox, below=of s4, fill=orange!30] (s5) {5. Select Queries};
+    \node[sbox, below=of s5, fill=orange!30] (s6) {6. Execute Neo4j};
+    \node[sbox, below=of s6, fill=yellow!30] (s7) {7. Return Context};
+
+    \draw[->, thick] (s1) -- (s2);
+    \draw[->, thick] (s2) -- (s3);
+    \draw[->, thick] (s3) -- (s4);
+    \draw[->, thick] (s4) -- (s5);
+    \draw[->, thick] (s5) -- (s6);
+    \draw[->, thick] (s6) -- (s7);
+
+\end{tikzpicture}
+\end{center}
+
 \footnotesize
-\begin{tabular}{|l|p{5cm}|}
-\hline
-\textbf{Node} & \textbf{Properties} \\
-\hline
-\textbf{Hotel} & hotel\_id, name, star\_rating, avg\_reviewer\_score, review\_count, avg\_cleanliness, avg\_comfort, avg\_facilities, avg\_location, avg\_staff, avg\_value \\
-\hline
-\textbf{City} & name \\
-\hline
-\textbf{Country} & name \\
-\hline
-\textbf{Review} & review\_id, text, date, score\_overall, score\_cleanliness, score\_comfort, score\_facilities, score\_location, score\_staff, score\_value \\
-\hline
-\textbf{Traveller} & traveller\_id, age\_group, gender, traveller\_type \\
-\hline
-\end{tabular}
-\end{column}
+\textbf{Key Function:} \texttt{process\_query\_for\_baseline(user\_query, driver)}
 
-\begin{column}{0.45\textwidth}
-\textbf{Relationships (7 types):}
-
-\vspace{0.2cm}
-\footnotesize
-\begin{tabular}{|l|l|}
-\hline
-\textbf{Relationship} & \textbf{Pattern} \\
-\hline
-LOCATED\_IN & Hotel $\rightarrow$ City \\
-LOCATED\_IN & City $\rightarrow$ Country \\
-REVIEWED & Review $\rightarrow$ Hotel \\
-WROTE & Traveller $\rightarrow$ Review \\
-STAYED\_AT & Traveller $\rightarrow$ Hotel \\
-FROM\_COUNTRY & Traveller $\rightarrow$ Country \\
-NEEDS\_VISA & Country $\rightarrow$ Country \\
-\hline
-\end{tabular}
-
-\vspace{0.3cm}
-\textbf{Graph Statistics:}
-\begin{itemize}
-    \scriptsize
-    \item 25 Hotels across 25 Cities
-    \item 24 Countries with visa relations
-    \item 500+ Reviews with scores
-    \item 500+ Travellers with demographics
-\end{itemize}
-\end{column}
-\end{columns}
-
-\vspace{0.2cm}
-\textbf{Key Design:} Hotels enriched with computed averages from reviews for embedding features
+\textbf{Flow:} Query $\rightarrow$ Intent $\rightarrow$ Entities $\rightarrow$ Params $\rightarrow$ Cypher $\rightarrow$ Neo4j $\rightarrow$ Context
 \end{frame}
+
+
 
 %------------------------------------------------------------------------------
 \begin{frame}{Cypher Query Templates (1/2)}
@@ -560,6 +536,7 @@ Corporate Tower & 8.7 \\
 %==============================================================================
 % SECTION 4: EMBEDDING-BASED RETRIEVAL
 %==============================================================================
+
 \section{Embedding-Based Retrieval}
 
 \begin{frame}{Dual Node Embedding Approach}
@@ -592,116 +569,53 @@ Corporate Tower & 8.7 \\
 \end{tikzpicture}
 \end{center}
 
-\vspace{0.2cm}
-\textbf{Approach:} Node Embeddings using two different graph algorithms from Neo4j GDS
-
-\textbf{Requirement:} ``Choose ONE approach, experiment with at least TWO different embedding models''
-\end{frame}
-
-%------------------------------------------------------------------------------
-\begin{frame}{Embedding Implementation Details}
-\begin{columns}
-\begin{column}{0.5\textwidth}
-\textbf{Node2Vec (Random Walks):}
-\begin{itemize}
-    \scriptsize
-    \item Uses Neo4j Graph Data Science (GDS)
-    \item Random walks explore graph topology
-    \item Parameters: walkLength=40, iterations=10
-    \item Learns from node connectivity patterns
-    \item All 5 node types embedded together
-\end{itemize}
-
-\vspace{0.2cm}
-\textbf{How it works:}
-\begin{enumerate}
-    \scriptsize
-    \item Project graph to GDS catalog
-    \item Run gds.node2vec.write() algorithm
-    \item Extract 128-dim vectors per node
-    \item Build FAISS index for hotels only
-    \item Store in Neo4j vector index
-\end{enumerate}
-\end{column}
-
-\begin{column}{0.5\textwidth}
-\textbf{FastRP (Random Projection):}
-\begin{itemize}
-    \scriptsize
-    \item Also uses Neo4j GDS library
-    \item Random projection-based embeddings
-    \item Parameters: iterationWeights=[0,1,1,1]
-    \item Faster computation than Node2Vec
-    \item Same graph structure input
-\end{itemize}
-
-\vspace{0.2cm}
-\textbf{How it works:}
-\begin{enumerate}
-    \scriptsize
-    \item Project graph to GDS catalog
-    \item Run gds.fastRP.write() algorithm
-    \item Extract 128-dim vectors per node
-    \item Build separate FAISS index
-    \item Store in Neo4j vector index
-\end{enumerate}
-
-\vspace{0.2cm}
-\textbf{Key Difference:}
-\begin{itemize}
-    \scriptsize
-    \item Node2Vec: Simulates walks (slower, more expressive)
-    \item FastRP: Random projections (faster, efficient)
-\end{itemize}
-\end{column}
-\end{columns}
 \end{frame}
 
 %------------------------------------------------------------------------------
 \begin{frame}{Embedding Models Comparison}
 \begin{table}
 \centering
-\footnotesize
+\scriptsize
 \begin{tabular}{lcc}
 \toprule
 \textbf{Property} & \textbf{Node2Vec} & \textbf{FastRP} \\
 \midrule
 Algorithm & Random Walks & Random Projection \\
 Dimension & 128 & 128 \\
-Neo4j GDS Function & gds.node2vec.write() & gds.fastRP.write() \\
-Input & Graph structure (5 node types) & Graph structure (5 node types) \\
+GDS Function & gds.node2vec.write() & gds.fastRP.write() \\
 \midrule
 Walk Length & 40 & -- \\
 Iterations & 10 & -- \\
-Iteration Weights & -- & [0.0, 1.0, 1.0, 1.0] \\
+Iter. Weights & -- & [0.0, 1.0, 1.0, 1.0] \\
 Computation Time & $\sim$2-3s & $\sim$0.2s \\
 \midrule
 Storage & Neo4j + FAISS & Neo4j + FAISS \\
 Similarity & Cosine (via FAISS) & Cosine (via FAISS) \\
 \bottomrule
 \end{tabular}
-\caption{Two Node Embedding Models for Comparison}
 \end{table}
 
-\vspace{0.2cm}
+\vspace{0.1cm}
 \begin{columns}
 \begin{column}{0.5\textwidth}
 \textbf{Node2Vec Strengths:}
 \begin{itemize}
     \scriptsize
-    \item Captures higher-order neighborhood patterns
-    \item Better at finding structurally similar nodes
-    \item Flexible p,q parameters for exploration
-    \item More expressive representations
+    \setlength{\itemsep}{0.05em}
+    \item Captures higher-order patterns
+    \item Better structural similarity
+    \item Flexible p,q parameters
+    \item More expressive
 \end{itemize}
 \end{column}
 \begin{column}{0.5\textwidth}
 \textbf{FastRP Strengths:}
 \begin{itemize}
     \scriptsize
-    \item 10x faster computation ($\sim$0.2s vs $\sim$2s)
+    \setlength{\itemsep}{0.05em}
+    \item 10x faster ($\sim$0.2s vs $\sim$2s)
     \item Memory efficient
-    \item Good for large-scale graphs
+    \item Good for large graphs
     \item Simpler hyperparameters
 \end{itemize}
 \end{column}
@@ -823,88 +737,40 @@ The Golden Oasis & 0.553 \\
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Embedding Models - Quantitative Comparison}
-\begin{table}
-\centering
-\begin{tabular}{lccc}
-\toprule
-\textbf{Metric} & \textbf{Node2Vec} & \textbf{FastRP} & \textbf{Notes} \\
-\midrule
-Embedding Dimension & 128 & 128 & Same dimensionality \\
-Algorithm & Random Walks & Random Projection & Different approaches \\
-Setup Time & $\sim$2-3s & $\sim$0.2s & FastRP 10x faster \\
-Query Latency & 2-4ms & 2-4ms & Similar (FAISS) \\
-\midrule
-GDS Function & gds.node2vec.write() & gds.fastRP.write() & Neo4j GDS \\
-Key Parameters & walkLength, iterations & iterationWeights & Tunable \\
-Memory Usage & Higher & Lower & FastRP more efficient \\
-\bottomrule
-\end{tabular}
-\caption{Node2Vec vs FastRP Performance Comparison}
-\end{table}
-
-\vspace{0.2cm}
-\textbf{Key Differences:}
-\begin{itemize}
-    \scriptsize
-    \item \textbf{Node2Vec}: Captures higher-order neighborhood patterns through simulated walks
-    \item \textbf{FastRP}: Faster computation, good for large graphs, simpler hyperparameters
-    \item \textbf{Results}: Different similar hotels returned (as shown in UI comparison)
-    \item \textbf{Unified Interface}: HotelEmbeddingRetriever allows runtime model switching
-\end{itemize}
-\end{frame}
-
-%------------------------------------------------------------------------------
-\begin{frame}{Unified Retriever Interface}
-\textbf{Black-Box Design Pattern:} Single interface abstracts both embedding models
-
-\vspace{0.3cm}
-\begin{columns}
+\begin{frame}{Error Analysis \& Improvement (Embeddings)}
+\begin{columns}[T]
 \begin{column}{0.5\textwidth}
-\textbf{Simple Function API:}
-\footnotesize
-
-\texttt{from embeddings\_retreiver import}
-
-\texttt{~~~~search\_hotels, set\_model\_type}
-
-\vspace{0.2cm}
-\texttt{\# Default: node2vec model}
-
-\texttt{results = search\_hotels("hotel in Paris")}
-
-\vspace{0.2cm}
-\texttt{\# Switch to fastrp}
-
-\texttt{set\_model\_type('fastrp')}
-
-\texttt{results = search\_hotels("beach hotel")}
+\textbf{Error Analysis:}
+\begin{itemize}
+    \setlength{\itemsep}{0.3em}
+    \item Graph embeddings are \textbf{not text encoders}
+    \item Cannot convert text queries to vectors
+    \item Requires hotel name extraction first
+    \item Search fails if no hotel found
+\end{itemize}
 \end{column}
 
 \begin{column}{0.5\textwidth}
-\textbf{Class API (more control):}
-\footnotesize
-
-\texttt{retriever = HotelEmbeddingRetriever(}
-
-\texttt{~~~~driver, model\_type='node2vec')}
-
-\vspace{0.2cm}
-\texttt{\# Same methods for both models}
-
-\texttt{retriever.find\_similar\_hotels(name)}
-
-\texttt{retriever.search\_by\_query(query)}
-
-\vspace{0.2cm}
-\texttt{\# Runtime model switching}
-
-\texttt{retriever.model\_type = 'fastrp'}
+\textbf{Improvement Added:}
+\begin{itemize}
+    \setlength{\itemsep}{0.3em}
+    \item Fallback when no hotel name:
+    \begin{itemize}
+        \item Keyword match on city/country
+        \item Use first hotel from KG context
+    \end{itemize}
+\end{itemize}
 \end{column}
 \end{columns}
 
-\vspace{0.3cm}
-\textbf{Auto-initialization:} Loads existing FAISS index or runs setup if needed
+\vspace{0.5cm}
+\textbf{Key Limitations:}
+\begin{enumerate}
+    \small
+    \setlength{\itemsep}{0.2em}
+    \item Node embeddings + FAISS don't use Cypher $\rightarrow$ relationships only captured implicitly via node walks. Both \textbf{relationships} and \textbf{directionality} are lost.
+    \item Vector similarity finds fuzzy matches — for precise queries (numbers, names), we must apply custom filters first, then run hybrid retrieval.
+\end{enumerate}
 \end{frame}
 
 %==============================================================================
@@ -912,34 +778,68 @@ Memory Usage & Higher & Lower & FastRP more efficient \\
 %==============================================================================
 \section{LLM Layer}
 
-\begin{frame}{Context Construction}
+\begin{frame}{LLM Context Construction}
+\large
 \textbf{Process Flow:}
 
+\vspace{0.5cm}
 \begin{enumerate}
-    \item \textbf{Intent Classification} $\rightarrow$ Select relevant Cypher templates
-    \item \textbf{Entity Extraction} $\rightarrow$ Fill template parameters
-    \item \textbf{Graph Retrieval} $\rightarrow$ Execute Cypher queries on Neo4j
-    \item \textbf{Embedding Retrieval} $\rightarrow$ FAISS similarity search
-    \item \textbf{Context Merge} $\rightarrow$ Combine all results
+    \setlength{\itemsep}{0.4cm}
+    \item \textbf{Intent Classification}
+    \begin{itemize}
+        \item Classify the intent of user query to select relevant Cypher templates
+    \end{itemize}
+
+    \item \textbf{Entity Extraction}
+    \begin{itemize}
+        \item Extract entities from user query to fill in Cypher template parameters
+    \end{itemize}
+
+    \item \textbf{Graph Retrieval}
+    \begin{itemize}
+        \item Execute selected Cypher queries on Neo4j database
+    \end{itemize}
+
+    \item \textbf{Context Merge}
+    \begin{itemize}
+        \item Combine all results to build the final context for LLM
+    \end{itemize}
 \end{enumerate}
 
-\vspace{0.3cm}
-\textbf{Intent-based Query Selection:}
+\end{frame}
 
+%------------------------------------------------------------------------------
+\begin{frame}{Intent-to-Query Mapping}
 \footnotesize
-\begin{tabular}{|l|l|}
+\begin{tabular}{|l|p{8cm}|}
 \hline
-\textbf{Intent} & \textbf{Cypher Queries Used} \\
+\textbf{Intent} & \textbf{Cypher Queries Selected} \\
 \hline
 hotel\_recommendation & get\_top\_rated\_hotels\_in\_city, get\_top\_rated\_hotels\_in\_country \\
 \hline
-visa\_query & get\_countries\_requiring\_visa, get\_hotels\_accessible\_without\_visa \\
+hotel\_search & get\_hotels\_by\_rating, get\_hotels\_in\_city\_by\_rating, get\_hotels\_in\_country\_by\_rating \\
 \hline
-traveller\_preference & get\_best\_hotels\_for\_traveller\_type, get\_best\_hotels\_for\_gender \\
+hotel\_info & get\_hotel\_info \\
+\hline
+review\_query & get\_hotel\_reviews, get\_hotel\_review\_count, get\_latest\_hotel\_reviews, get\_hotel\_reviews\_filtered \\
 \hline
 comparison & compare\_two\_hotels \\
 \hline
+traveller\_preference & get\_best\_hotels\_for\_traveller\_type, get\_best\_hotels\_for\_gender, get\_best\_hotels\_for\_age\_group \\
+\hline
+location\_query & get\_hotels\_in\_city, get\_hotels\_in\_country, get\_cities\_in\_country \\
+\hline
+visa\_query & get\_countries\_requiring\_visa, get\_hotels\_accessible\_without\_visa \\
+\hline
+rating\_filter & get\_hotels\_by\_cleanliness\_base, get\_hotels\_by\_comfort\_base, get\_hotels\_by\_facilities\_base \\
+\hline
+general\_question & get\_all\_hotels \\
+\hline
 \end{tabular}
+
+\vspace{0.3cm}
+\normalsize
+\textbf{Total:} 31 Cypher query templates mapped to 10 intents
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -947,7 +847,11 @@ comparison & compare\_two\_hotels \\
 \textbf{Persona Definition:}
 
 \footnotesize
-``You are J.A.R.V.I.S., an advanced AI hotel concierge assistant. You speak with sophisticated eloquence and always address the user as 'sir' or 'madam'. Your responses are warm yet professional, helpful and conversational - never robotic or formulaic.''
+``You are J.A.R.V.I.S., an advanced AI hotel concierge assistant.
+You speak with sophisticated eloquence and always address the user as 'sir' or 'madam'.
+Your responses are warm yet professional, helpful and conversational - never robotic or formulaic.
+NEVER start responses with phrases like 'Based on the data provided' or 'According to the information'.
+Instead, speak naturally as if you personally know these hotels and are offering genuine recommendations.''
 
 \vspace{0.3cm}
 \normalsize
@@ -956,49 +860,35 @@ comparison & compare\_two\_hotels \\
 \footnotesize
 \begin{itemize}
     \item Address the user respectfully as ``sir'' at least once
-    \item NEVER start with ``Based on the data provided'' or similar phrases
-    \item Be conversational and natural, like having a pleasant discussion
-    \item Provide specific details without mentioning ``the data'' or ``the context''
-    \item Explain WHY hotels would be good choices
+    \item Be conversational and natural, as if having a pleasant discussion
+    \item Provide specific details from the data without mentioning "the data" or "the context"
+    \item Use the Hotel information data available below (that was retrieved based on the query) as context/baseline information to help with the recommendations.
+    \item If recommending hotels display ranked recommendations with explanations. Show why certain entities were recommended based on user preferences and KG data 
     \item Keep responses concise but informative
 \end{itemize}
-
-\vspace{0.3cm}
-\normalsize
-\textbf{Context Injection:}
-
-\footnotesize
-Hotel information from KG retrieval and embedding search is appended to the prompt, but the LLM is instructed to present it naturally without referencing it as ``data''.
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{LLM Comparison - Models}
-\begin{table}
-\centering
-\begin{tabular}{lccc}
-\toprule
-\textbf{Property} & \textbf{Gemma-2-2B} & \textbf{Mistral-7B} & \textbf{LLaMA-3.1-8B} \\
-\midrule
-Parameters & 2B & 7B & 8B \\
-Provider & Google & Mistral AI & Meta \\
-API & HuggingFace & HuggingFace & HuggingFace \\
-Temperature & 0.2 & 0.2 & 0.2 \\
-Max Tokens & 500 & 500 & 500 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\vspace{0.3cm}
-\textbf{Integration:} LangChain wrappers for HuggingFace Inference API
-
-\vspace{0.2cm}
-\textbf{Wrapper Pattern:}
+\begin{frame}{Context Injection}
+\begin{columns}[T]
+\begin{column}{0.5\textwidth}
+\textbf{Baseline Context Injection:}
 \begin{itemize}
-    \footnotesize
-    \item Custom LLM class extending LangChain base
-    \item Chat completion with message formatting
-    \item Configurable max\_tokens and temperature
+    \item Hotel information from KG retrieval (Cypher queries) is appended to the prompt
 \end{itemize}
+\end{column}
+
+\begin{column}{0.5\textwidth}
+\textbf{Embeddings Context:}
+\begin{itemize}
+    \item LLM is given a retriever that performs similarity search on embeddings
+    \item Finds hotels similar to the one mentioned in query
+\end{itemize}
+\end{column}
+\end{columns}
+
+\vspace{0.4cm}
+\textbf{Combined Approach:} Both baseline (explicit KG data) and embedding (implicit similarity) contexts are merged to provide comprehensive information to the LLM.
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -1009,21 +899,26 @@ Max Tokens & 500 & 500 & 500 \\
 \toprule
 \textbf{Model} & \textbf{Latency (s)} & \textbf{Input Tok} & \textbf{Output Tok} & \textbf{Cost (\$)} & \textbf{Sem. Acc.} \\
 \midrule
-Gemma-2-2B & 1.2 & 45 & 150 & 0.00004 & 0.78 \\
-Mistral-7B & 2.1 & 45 & 180 & 0.00012 & 0.84 \\
-LLaMA-3.1-8B & 2.8 & 45 & 200 & 0.00018 & 0.86 \\
+Gemma-2-2B & 0.51 & 6 & 31 & 0.000007 & 0.057 \\
+Mistral-7B & 10.60 & 6 & 211 & 0.000128 & 0.037 \\
+LLaMA-3.1-8B & 4.63 & 6 & 382 & 0.000307 & 0.252 \\
 \bottomrule
 \end{tabular}
 \caption{Performance Metrics (averaged across test queries)}
 \end{table}
 
-\vspace{0.3cm}
+\vspace{0.1cm}
+\footnotesize
 \textbf{Semantic Accuracy Calculation:}
+\begin{itemize}
+    \setlength{\itemsep}{0.05em}
+    \item \textbf{Method:} Cosine similarity (SentenceTransformer) between LLM response and reference embeddings
+    \item \textbf{Test Query:} ``Hotels recommended for seniors''
+    \item \textbf{Reference:} ``Canal House Grand in Amsterdam, high comfort/cleanliness score, fantastic location.''
+\end{itemize}
 
-Cosine similarity between LLM response embedding and reference answer embedding using SentenceTransformer (all-MiniLM-L6-v2).
-
-\vspace{0.2cm}
-\textbf{Cost Calculation:} Based on HuggingFace API pricing per 1K tokens.
+\vspace{0.1cm}
+\textbf{Cost:} HuggingFace API pricing/1K tokens \quad \textbf{Integration:} LangChain + HuggingFace Inference API
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -1109,11 +1004,11 @@ Cosine similarity between LLM response embedding and reference answer embedding 
     \draw[->, thick] (s1) -- (s2);
     \draw[->, thick] (s2) -- (s3);
     \draw[->, thick] (s3) -- (s4);
-    \draw[->, thick] (s4) -- (s5);
+    \draw[->, thick] (s4) -- ++(0,-0.8) -| (s5);
     \draw[->, thick] (s5) -- (s6);
     \draw[->, thick] (s6) -- (s7);
     \draw[->, thick] (s7) -- (s8);
-    \draw[->, thick] (s8) -- (s9);
+    \draw[->, thick] (s8) -- ++(0,-0.8) -| (s9);
     \draw[->, thick] (s9) -- (s10);
 
 \end{tikzpicture}
