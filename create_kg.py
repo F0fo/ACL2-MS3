@@ -22,10 +22,10 @@ class KnowledgeGraphBuilder:
         self.reviewsDF = pd.read_csv('./data/reviews.csv')
         self.visaDF = pd.read_csv('./data/visa.csv')
         
-        print(f"  ✓ Loaded {len(self.hotelsDF):,} hotels")
-        print(f"  ✓ Loaded {len(self.usersDF):,} users")
-        print(f"  ✓ Loaded {len(self.reviewsDF):,} reviews")
-        print(f"  ✓ Loaded {len(self.visaDF):,} visa records")
+        print(f"  Loaded {len(self.hotelsDF):,} hotels")
+        print(f"  Loaded {len(self.usersDF):,} users")
+        print(f"  Loaded {len(self.reviewsDF):,} reviews")
+        print(f"  Loaded {len(self.visaDF):,} visa records")
     
     # ==================== NODE CREATION METHODS ====================
     
@@ -46,7 +46,7 @@ class KnowledgeGraphBuilder:
                 MERGE (c:Country {name: name})
             """, names=countries_list)
         
-        print(f"  ✓ Created {len(countries_list)} Country nodes")
+        print(f"  Created {len(countries_list)} Country nodes")
     
     def create_cities(self):
         """Create City nodes from hotels data"""
@@ -60,7 +60,7 @@ class KnowledgeGraphBuilder:
                 MERGE (c:City {name: name})
             """, names=cities_list)
         
-        print(f"  ✓ Created {len(cities_list)} City nodes")
+        print(f"  Created {len(cities_list)} City nodes")
     
     def create_hotels(self):
         """Create Hotel nodes from hotels data"""
@@ -87,7 +87,7 @@ class KnowledgeGraphBuilder:
                     h.facilities_base = hotel.facilities_base
             """, hotels=hotels_list)
         
-        print(f"  ✓ Created {len(hotels_list)} Hotel nodes")
+        print(f"  Created {len(hotels_list)} Hotel nodes")
     
     def create_travellers(self):
         """Create Traveller nodes from users data"""
@@ -110,7 +110,7 @@ class KnowledgeGraphBuilder:
                     t.type = user.type
             """, users=users_list)
         
-        print(f"  ✓ Created {len(users_list)} Traveller nodes")
+        print(f"  Created {len(users_list)} Traveller nodes")
     
     def create_reviews(self, batch_size=1000):
         """Create Review nodes from reviews data"""
@@ -152,7 +152,7 @@ class KnowledgeGraphBuilder:
             
             print(f" Processed batch {i//batch_size + 1}/{(total_reviews + batch_size - 1)//batch_size}")
         
-        print(f"  ✓ Created {total_reviews:,} Review nodes")
+        print(f"  Created {total_reviews:,} Review nodes")
     
     # ==================== RELATIONSHIP CREATION METHODS ====================
     
@@ -181,7 +181,7 @@ class KnowledgeGraphBuilder:
             
             print(f"  Processed batch {i//batch_size + 1}/{(total_reviews + batch_size - 1)//batch_size}")
         
-        print(f"  ✓ Created WROTE relationships")
+        print(f"  Created WROTE relationships")
     
     def create_from_country_relationships(self):
         """Create FROM_COUNTRY relationships between Traveller and Country"""
@@ -202,7 +202,7 @@ class KnowledgeGraphBuilder:
                 MERGE (t)-[:FROM_COUNTRY]->(c)
             """, relations=relationships)
         
-        print(f"  ✓ Created {len(relationships)} FROM_COUNTRY relationships")
+        print(f"  Created {len(relationships)} FROM_COUNTRY relationships")
     
     def create_stayed_at_relationships(self, batch_size=1000):
         """Create STAYED_AT relationships between Traveller and Hotel"""
@@ -231,7 +231,7 @@ class KnowledgeGraphBuilder:
             
             print(f"   Processed batch {i//batch_size + 1}/{(total + batch_size - 1)//batch_size}")
         
-        print(f"  ✓ Created STAYED_AT relationships")
+        print(f"  Created STAYED_AT relationships")
     
     def create_reviewed_relationships(self, batch_size=1000):
         """Create REVIEWED relationships between Review and Hotel"""
@@ -258,7 +258,7 @@ class KnowledgeGraphBuilder:
             
             print(f"  ⏳ Processed batch {i//batch_size + 1}/{(total_reviews + batch_size - 1)//batch_size}")
         
-        print(f"  ✓ Created REVIEWED relationships")
+        print(f"  Created REVIEWED relationships")
     
     def create_hotel_located_in_relationships(self):
         """Create LOCATED_IN relationships between Hotel and City"""
@@ -279,7 +279,7 @@ class KnowledgeGraphBuilder:
                 MERGE (h)-[:LOCATED_IN]->(c)
             """, relations=relationships)
         
-        print(f"  ✓ Created {len(relationships)} Hotel LOCATED_IN relationships")
+        print(f"  Created {len(relationships)} Hotel LOCATED_IN relationships")
     
     def create_city_located_in_relationships(self):
         """Create LOCATED_IN relationships between City and Country"""
@@ -303,7 +303,7 @@ class KnowledgeGraphBuilder:
                 MERGE (ci)-[:LOCATED_IN]->(co)
             """, relations=relationships)
         
-        print(f"  ✓ Created {len(relationships)} City LOCATED_IN relationships")
+        print(f"  Created {len(relationships)} City LOCATED_IN relationships")
     
     def create_needs_visa_relationships(self):
         """Create NEEDS_VISA relationships between Countries"""
@@ -326,7 +326,7 @@ class KnowledgeGraphBuilder:
                 MERGE (from)-[:NEEDS_VISA {visa_type: relation.visa_type}]->(to)
             """, relations=relationships)
         
-        print(f"  ✓ Created {len(relationships)} NEEDS_VISA relationships")
+        print(f"  Created {len(relationships)} NEEDS_VISA relationships")
     
     # ==================== COMBINED METHODS ====================
     
@@ -370,7 +370,7 @@ class KnowledgeGraphBuilder:
             print("\n  Clearing existing database...")
             with self.driver.session() as session:
                 session.run("MATCH (n) DETACH DELETE n")
-            print("  ✓ Database cleared")
+            print("  Database cleared")
         
         self.create_all_nodes()
         self.create_all_relationships()

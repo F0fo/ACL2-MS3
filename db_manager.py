@@ -53,7 +53,7 @@ class DBManager:
             )
             # Test connection
             driver.verify_connectivity()
-            print("✓ Connected to Neo4j successfully")
+            print("Connected to Neo4j successfully")
             return driver
         except Exception as e:
             raise Exception(f"Failed to connect to Neo4j: {e}")
@@ -62,16 +62,14 @@ class DBManager:
         """Close the driver connection"""
         if self.driver:
             self.driver.close()
-            print("✓ Database connection closed")
-    
-    def clear_db(self):
+            print("Database connection closed")
         """Clear all nodes and relationships from database"""
         with self.driver.session() as session:
             try:
                 session.run("MATCH (n) DETACH DELETE n")
-                print("✓ Database cleared")
+                print("Database cleared")
             except Exception as e:
-                print(f"✗ Error clearing database: {e}")
+                print(f"Error clearing database: {e}")
                 raise
     
     def check_db_status(self):
@@ -99,7 +97,7 @@ class DBManager:
                     'relationships': rel_counts
                 }
             except Exception as e:
-                print(f"✗ Error checking database status: {e}")
+                print(f"Error checking database status: {e}")
                 return {'nodes': [], 'relationships': []}
     
     def is_db_populated(self):
@@ -110,7 +108,7 @@ class DBManager:
                 count = result.single()['count']
                 return count > 0
             except Exception as e:
-                print(f"✗ Error checking if database is populated: {e}")
+                print(f"Error checking if database is populated: {e}")
                 return False
     
     def print_status(self):
