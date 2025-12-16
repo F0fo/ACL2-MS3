@@ -49,7 +49,7 @@ class EmbeddingRetriever:
             # Try to drop existing graph
             try:
                 session.run(drop_query)
-                print("  ✓ Dropped existing graph projection")
+                print("  Dropped existing graph projection")
             except ClientError as e:
                 if "not found" not in str(e).lower():
                     print(f"Warning: Could not drop graph: {e}")
@@ -58,7 +58,7 @@ class EmbeddingRetriever:
             try:
                 result = session.run(create_query)
                 data = result.data()[0]
-                print(f"  ✓ Graph created: {data['nodeCount']} nodes, {data['relationshipCount']} relationships")
+                print(f"  Graph created: {data['nodeCount']} nodes, {data['relationshipCount']} relationships")
                 return data
             except ClientError as e:
                 print(f" Error creating graph: {e}")
@@ -85,7 +85,7 @@ class EmbeddingRetriever:
             try:
                 result = session.run(query)
                 data = result.data()[0]
-                print(f"  ✓ Node2Vec complete:")
+                print(f"  Node2Vec complete:")
                 print(f"    - Nodes processed: {data.get('nodePropertiesWritten', 'N/A')}")
                 print(f"    - Computation time: {data.get('computeMillis', 0)/1000:.2f}s")
                 return data
@@ -120,7 +120,7 @@ class EmbeddingRetriever:
                 
                 # Create new index
                 session.run(create_query)
-                print(f"  ✓ Vector index '{self.VECTOR_INDEX}' created")
+                print(f"  Vector index '{self.VECTOR_INDEX}' created")
             except ClientError as e:
                 print(f"  ❌ Error creating vector index: {e}")
                 raise
