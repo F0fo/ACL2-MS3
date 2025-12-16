@@ -1802,7 +1802,7 @@ def main():
 
                     # Extra details for feature model
                     if r.get('avg_score') is not None:
-                        print(f"   Avg Score: {r['avg_score']:.1f} | Clean: {r.get('cleanliness', 0):.1f} | Comfort: {r.get('comfort', 0):.1f}")
+                        print(f"   Avg: {r['avg_score']:.1f} | Clean: {r.get('cleanliness', 0):.1f} | Comfort: {r.get('comfort', 0):.1f} | Facilities: {r.get('facilities', 0):.1f} | Location: {r.get('location', 0):.1f}")
                     print()
             else:
                 print(f" No results found for query: '{args.query}'")
