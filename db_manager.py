@@ -63,6 +63,8 @@ class DBManager:
         if self.driver:
             self.driver.close()
             print("Database connection closed")
+
+    def clear_database(self):
         """Clear all nodes and relationships from database"""
         with self.driver.session() as session:
             try:
