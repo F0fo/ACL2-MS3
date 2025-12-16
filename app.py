@@ -75,13 +75,20 @@ def visualize_neo4j_subgraph(context, params):
         st.info("No graph data available")
 
 
-st.title("🏨 Hotel Recommendation System")
+st.title("Hotel Recommender System")
+
+# Model selection
+model_option = st.selectbox(
+    "Select LLM Model:",
+    options=["Gemma", "Mistral", "LLaMA"],
+    index=0
+)
 
 # Query input
 user_question = st.text_input("Ask me anything about hotels:")
 
 if user_question:
-    # 1. Intent & Entities
+    # Intent & Entities
     intent_result = classify_intent(user_question)
     entities = extract_entities(user_question)
     params = get_cypher_params(entities)
@@ -93,7 +100,7 @@ if user_question:
     if entities:
         st.json(entities)
 
-    # 2. KG Context
+    # KG Context
     st.subheader("Knowledge Graph Context")
     context = process_query_for_baseline(user_question, st.session_state.db_manager.driver)
 
@@ -120,19 +127,36 @@ if user_question:
     else:
         st.warning("No context retrieved")
 
-    # 3. Graph Visualization
+    # Graph Visualization
     if valid_context:
         st.subheader("Graph Visualization")
         visualize_neo4j_subgraph(valid_context, params)
 
-    # 4. LLM Response
+    # LLM Response
     st.subheader("AI Response")
-    # call_llm currently does not return a final answer; call it to get structured info if implemented
     try:
-        llm_payload = call_llm(user_question)
-        if llm_payload and isinstance(llm_payload, dict) and 'answer' in llm_payload:
-            st.success(llm_payload['answer'])
-        else:
-            st.info("LLM response not available. call_llm() may need to return {'answer': ...}")
+        with st.spinner(f"Generating response with {model_option}..."):
+            answer_gemma, answer_mistral, answer_llama = call_llm(user_question)
+
+        # Select answer based on model choice
+        if model_option == "Gemma":
+            selected_answer = answer_gemma
+        elif model_option == "Mistral":
+            selected_answer = answer_mistral
+        else:  # LLaMA
+            selected_answer = answer_llama
+
+        st.success(selected_answer)
+
+        # Optionally show all model responses in expanders
+        with st.expander("View All Model Responses"):
+            st.markdown("**Gemma:**")
+            st.write(answer_gemma)
+            st.markdown("**Mistral:**")
+            st.write(answer_mistral)
+            st.markdown("**LLaMA:**")
+            st.write(answer_llama)
+
     except Exception as e:
         st.error(f"Error calling LLM: {e}")
+
