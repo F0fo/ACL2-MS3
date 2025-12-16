@@ -3,9 +3,6 @@ import numpy as np
 
 
 class GraphRetriever:
-    # def __init__(self, uri, user, password):
-    #     self.driver = GraphDatabase.driver(uri, auth=(user, password))
-
     def __init__(self, driver):
         """Initialize with Neo4j driver"""
         self.driver = driver
@@ -13,340 +10,391 @@ class GraphRetriever:
     def close(self):
         self.driver.close()
 
-    # Baseline queries - different forms of queries to retrieve hotel information
+    def _extract_graph_data(self, result):
+        """Extract nodes and relationships from Neo4j result"""
+        nodes = []
+        relationships = []
 
-    #1. Get hotels based on city
+        for record in result:
+            for value in record.values():
+                if hasattr(value, 'nodes') and hasattr(value, 'relationships'):
+                    # It's a path
+                    for node in value.nodes:
+                        nodes.append({
+                            'id': node.element_id,
+                            'labels': list(node.labels),
+                            'properties': dict(node)
+                        })
+                    for rel in value.relationships:
+                        relationships.append({
+                            'id': rel.element_id,
+                            'type': rel.type,
+                            'start': rel.start_node.element_id,
+                            'end': rel.end_node.element_id,
+                            'properties': dict(rel)
+                        })
+                elif hasattr(value, 'labels'):
+                    # It's a node
+                    nodes.append({
+                        'id': value.element_id,
+                        'labels': list(value.labels),
+                        'properties': dict(value)
+                    })
+
+        return {'nodes': nodes, 'relationships': relationships}
+
     def get_hotels_in_city(self, city):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City {name: $city})
-        RETURN h.name AS hotel, h.star_rating AS rating
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City {name: $city})
+        RETURN path
         """
         with self.driver.session() as session:
-            return session.run(query, city=city).data()
-        
-    #2. Get hotels based on country    
+            result = session.run(query, city=city)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_hotels_in_country(self, country):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country {name: $country})
-        RETURN h.name AS hotel, h.star_rating AS rating
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country {name: $country})
+        RETURN path
         """
         with self.driver.session() as session:
-            return session.run(query, country=country).data()
+            result = session.run(query, country=country)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #3. Get cities in a country    
     def get_cities_in_country(self, country):
         query = """
-        MATCH (c:City)-[:LOCATED_IN]->(co:Country {name: $country})
-        RETURN c.name AS city
+        MATCH path = (c:City)-[:LOCATED_IN]->(co:Country {name: $country})
+        RETURN path
         """
         with self.driver.session() as session:
-            return session.run(query, country=country).data()
+            result = session.run(query, country=country)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #4. Get cities with hotels
     def get_cities_With_Hotels(self):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)
-        RETURN DISTINCT c.name AS city, h.name as hotel
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)
+        RETURN path
+        LIMIT 50
         """
         with self.driver.session() as session:
-            return session.run(query).data()
+            result = session.run(query)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #5. Get countries with hotels    
     def get_countries_With_Hotels(self):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
-        RETURN DISTINCT co.name AS country, h.name as hotel
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
+        RETURN path
+        LIMIT 50
         """
         with self.driver.session() as session:
-            return session.run(query).data()
-           
-    #6. Get hotels by minimum star rating
+            result = session.run(query)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_hotels_by_rating(self, min_rating=5):
         query = """
-        MATCH (h:Hotel)
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
         WHERE h.star_rating >= $min_rating
-        RETURN h.name AS hotel, h.star_rating AS rating
+        RETURN path
         ORDER BY h.star_rating DESC
+        LIMIT 25
         """
         with self.driver.session() as session:
-            return session.run(query, min_rating=min_rating).data()
+            result = session.run(query, min_rating=min_rating)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #7. Get hotels in a city with minimum star rating    
     def get_hotels_in_city_by_rating(self, city, min_rating=5):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City {name: $city})
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City {name: $city})
         WHERE h.star_rating >= $min_rating
-        RETURN h.name AS hotel, h.star_rating AS rating
+        RETURN path
         ORDER BY h.star_rating DESC
         """
         with self.driver.session() as session:
-            return session.run(query, city=city, min_rating=min_rating).data()
+            result = session.run(query, city=city, min_rating=min_rating)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #8. Get hotels in a country with minimum star rating
     def get_hotels_in_country_by_rating(self, country, min_rating=5):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country {name: $country})
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country {name: $country})
         WHERE h.star_rating >= $min_rating
-        RETURN h.name AS hotel, h.star_rating AS rating
+        RETURN path
         ORDER BY h.star_rating DESC
         """
         with self.driver.session() as session:
-            return session.run(query, country=country, min_rating=min_rating).data()    
+            result = session.run(query, country=country, min_rating=min_rating)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #9. Get specific hotel
     def get_hotel_info(self, hotel_name):
         query = """
-        MATCH (h:Hotel {name: $hotel_name})-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country )
-        RETURN h.name AS hotel, h.star_rating AS rating, h.cleanliness_base AS cleanliness_base, h.comfort_base AS comfort_base, h.facilities_base AS facilities_base, c.name AS city, co.name AS country
+        MATCH path = (h:Hotel {name: $hotel_name})-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
+        RETURN path
         """
         with self.driver.session() as session:
-            return session.run(query, hotel_name=hotel_name).data()
-        
-    #since one hotel per city/country, top rated is same as all hotels in that city/country sorted by rating
-    #10. Get top rated hotels in a city
+            result = session.run(query, hotel_name=hotel_name)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_top_rated_hotels_in_city(self, city, top_n=5):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City {name: $city})
-        RETURN h.name AS hotel, h.star_rating AS rating
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City {name: $city})
+        RETURN path
         ORDER BY h.star_rating DESC
         LIMIT $top_n
         """
         with self.driver.session() as session:
-            return session.run(query, city=city, top_n=top_n).data()
+            result = session.run(query, city=city, top_n=top_n)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #11. Get top rated hotels in a country    
     def get_top_rated_hotels_in_country(self, country, top_n=5):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country {name: $country})
-        RETURN h.name AS hotel, h.star_rating AS rating
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country {name: $country})
+        RETURN path
         ORDER BY h.star_rating DESC
         LIMIT $top_n
         """
         with self.driver.session() as session:
-            return session.run(query, country=country, top_n=top_n).data()
+            result = session.run(query, country=country, top_n=top_n)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #12. Get 10 random hotel reviews
     def get_hotel_reviews(self, hotel_name):
-        randomOffset = np.random.randint(0,50)
+        randomOffset = np.random.randint(0, 50)
         query = """
-        MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)
-        RETURN r.text AS review, r.score_overall AS rating
+        MATCH path = (t:Traveller)-[:WROTE]->(r:Review)-[:REVIEWED]->(h:Hotel {name: $hotel_name})
+        RETURN path
         ORDER BY r.score_overall DESC
         SKIP $randomOffset
         LIMIT 10
         """
         with self.driver.session() as session:
-            return session.run(query, hotel_name=hotel_name, randomOffset=randomOffset).data()
+            result = session.run(query, hotel_name=hotel_name, randomOffset=randomOffset)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #13. Get hotel review count
     def get_hotel_review_count(self, hotel_name):
         query = """
         MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)
         RETURN COUNT(r) AS review_count
         """
         with self.driver.session() as session:
-            return session.run(query, hotel_name=hotel_name).data()
+            result = session.run(query, hotel_name=hotel_name)
+            return {'query': query.strip(), 'rows': result.data()}
 
-    #14. Get latest hotel reviews    
     def get_latest_hotel_reviews(self, hotel_name, limit=5):
         query = """
-        MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)
-        RETURN r.text AS review, r.score_overall AS rating, r.date AS date
+        MATCH path = (t:Traveller)-[:WROTE]->(r:Review)-[:REVIEWED]->(h:Hotel {name: $hotel_name})
+        RETURN path
         ORDER BY r.date DESC
         LIMIT $limit
         """
         with self.driver.session() as session:
-            return session.run(query, hotel_name=hotel_name, limit=limit).data()
+            result = session.run(query, hotel_name=hotel_name, limit=limit)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #15. Get specific hotel reviews by travelers from a specific country    
     def get_hotel_reviews_by_travelers_from_country(self, hotel_name, country):
         query = """
-        MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)-[:FROM_COUNTRY]->(co:Country {name: $country})
-        RETURN r.text AS review, r.score_overall AS rating
+        MATCH path = (t:Traveller)-[:FROM_COUNTRY]->(co:Country {name: $country}),
+                     (t)-[:WROTE]->(r:Review)-[:REVIEWED]->(h:Hotel {name: $hotel_name})
+        RETURN path
         ORDER BY r.score_overall DESC
         LIMIT 10
         """
         with self.driver.session() as session:
-            return session.run(query, hotel_name=hotel_name, country=country).data()
+            result = session.run(query, hotel_name=hotel_name, country=country)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #16. Get hotels with most reviews    
     def get_hotels_with_most_reviews(self, top_n=5):
         query = """
-        MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)
-        RETURN h.name AS hotel, COUNT(r) AS review_count
+        MATCH path = (h:Hotel)<-[:REVIEWED]-(r:Review)
+        WITH h, COUNT(r) AS review_count
         ORDER BY review_count DESC
         LIMIT $top_n
+        MATCH p = (h)-[:LOCATED_IN]->(c:City)
+        RETURN p
         """
         with self.driver.session() as session:
-            return session.run(query, top_n=top_n).data()
-        
-    #17. Get countries where a traveller from a specific country needs a visa
+            result = session.run(query, top_n=top_n)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_countries_requiring_visa(self, from_country):
         query = """
-        MATCH (t:Traveller)-[:FROM_COUNTRY]->(tc:Country {name: $from_country})-[:NEEDS_VISA]->(co:Country)
-        RETURN co.name AS country
+        MATCH path = (tc:Country {name: $from_country})-[:NEEDS_VISA]->(co:Country)
+        RETURN path
         """
         with self.driver.session() as session:
-            return session.run(query, from_country=from_country).data()
-        
-    #18. Get countries where a traveller from a specific country does not need a visa
+            result = session.run(query, from_country=from_country)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_countries_not_requiring_visa(self, from_country):
         query = """
-        MATCH (t:Traveller)-[:FROM_COUNTRY]->(tc:Country {name: $from_country})
+        MATCH (tc:Country {name: $from_country})
         MATCH (co:Country)
-        WHERE NOT (tc)-[:NEEDS_VISA]->(co)
-        RETURN co.name AS country
+        WHERE NOT (tc)-[:NEEDS_VISA]->(co) AND tc <> co
+        RETURN co
+        LIMIT 20
         """
         with self.driver.session() as session:
-            return session.run(query, from_country=from_country).data()
+            result = session.run(query, from_country=from_country)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-
-    # ------------------ case edging queries ------------------    
-    #19. get hotels reviewed by travellers from a specific country
     def get_hotels_reviewed_by_travellers_from_country(self, country):
         query = """
-        MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)-[:FROM_COUNTRY]->(co:Country {name: $country})
-        RETURN DISTINCT h.name AS hotel
+        MATCH path = (t:Traveller)-[:FROM_COUNTRY]->(co:Country {name: $country}),
+                     (t)-[:WROTE]->(r:Review)-[:REVIEWED]->(h:Hotel)
+        RETURN path
+        LIMIT 25
         """
         with self.driver.session() as session:
-            return session.run(query, country=country).data()
-        
-    #20. get hotels reviewed by travellers from a specific city
+            result = session.run(query, country=country)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_hotels_reviewed_by_travellers_from_city(self, city):
         query = """
-        MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)-[:FROM_COUNTRY]->(c:Country)<-[:LOCATED_IN]-(ci:City {name: "Rome"})
-        RETURN DISTINCT h.name AS hotel
+        MATCH path = (ci:City {name: $city})-[:LOCATED_IN]->(c:Country)<-[:FROM_COUNTRY]-(t:Traveller)-[:WROTE]->(r:Review)-[:REVIEWED]->(h:Hotel)
+        RETURN path
+        LIMIT 25
         """
         with self.driver.session() as session:
-            return session.run(query, city=city).data()
-    
-    #22. get hotels where traveller from a specific country can stay without visa
+            result = session.run(query, city=city)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_hotels_accessible_without_visa(self, from_country):
         query = """
-        MATCH (t:Traveller)-[:FROM_COUNTRY]->(tc:Country {name: $from_country})
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
+        MATCH (tc:Country {name: $from_country})
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
         WHERE NOT (tc)-[:NEEDS_VISA]->(co)
-        RETURN DISTINCT h.name AS hotel
+        RETURN path
+        LIMIT 25
         """
         with self.driver.session() as session:
-            return session.run(query, from_country=from_country).data()
-        
-    #23. get average hotel rating by travellers from a specific country
+            result = session.run(query, from_country=from_country)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_average_hotel_rating_by_travellers_from_country(self, hotel_name, country):
         query = """
         MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)-[:FROM_COUNTRY]->(co:Country {name: $country})
         RETURN AVG(r.score_overall) AS average_rating
         """
         with self.driver.session() as session:
-            return session.run(query, hotel_name=hotel_name, country=country).data()
-        
-    #21. Filter hotels reviews by demographic
+            result = session.run(query, hotel_name=hotel_name, country=country)
+            return {'query': query.strip(), 'rows': result.data()}
+
     def get_hotel_reviews_filtered(self, hotel_name, gender=None, age_group=None, traveller_type=None):
         query = """
-        MATCH (h:Hotel {name: $hotel_name})<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)
+        MATCH path = (t:Traveller)-[:WROTE]->(r:Review)-[:REVIEWED]->(h:Hotel {name: $hotel_name})
         WHERE ($gender IS NULL OR t.gender = $gender)
         AND ($age_group IS NULL OR t.age = $age_group)
         AND ($traveller_type IS NULL OR t.type = $traveller_type)
-        RETURN r.text AS review, r.score_overall AS rating
+        RETURN path
         ORDER BY r.score_overall DESC
         LIMIT 10
         """
         with self.driver.session() as session:
-            return session.run(query, hotel_name=hotel_name, gender=gender, age_group=age_group, traveller_type=traveller_type).data()  
+            result = session.run(query, hotel_name=hotel_name, gender=gender, age_group=age_group,
+                                 traveller_type=traveller_type)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #25. get best hotels for a specific traveller type
     def get_best_hotels_for_traveller_type(self, traveller_type):
         query = """
-        MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller)
-        WHERE t.type = $traveller_type
-        RETURN h.name AS hotel, AVG(r.score_overall) AS score
+        MATCH path = (t:Traveller {type: $traveller_type})-[:WROTE]->(r:Review)-[:REVIEWED]->(h:Hotel)
+        WITH h, AVG(r.score_overall) AS score
         ORDER BY score DESC
         LIMIT 10
+        MATCH p = (h)-[:LOCATED_IN]->(c:City)
+        RETURN p
         """
-
         with self.driver.session() as session:
-            return session.run(query, traveller_type=traveller_type).data()
-    
-    #26. get best hotels for specific gender of travellers
+            result = session.run(query, traveller_type=traveller_type)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_best_hotels_for_gender(self, gender):
         query = """
-        MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller {gender: $gender}) 
-        RETURN h.name AS hotel, AVG(r.score_overall) AS avg_rating
+        MATCH path = (t:Traveller {gender: $gender})-[:WROTE]->(r:Review)-[:REVIEWED]->(h:Hotel)
+        WITH h, AVG(r.score_overall) AS avg_rating
         ORDER BY avg_rating DESC
         LIMIT 10
+        MATCH p = (h)-[:LOCATED_IN]->(c:City)
+        RETURN p
         """
         with self.driver.session() as session:
-            return session.run(query, gender=gender).data()
-        
-    #27. get best hotels for specific age group of travellers
+            result = session.run(query, gender=gender)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_best_hotels_for_age_group(self, age_group):
         query = """
-        MATCH (h:Hotel)<-[:REVIEWED]-(r:Review)<-[:WROTE]-(t:Traveller {age: $age_group}) 
-        RETURN h.name AS hotel, AVG(r.score_overall) AS avg_rating
+        MATCH path = (t:Traveller {age: $age_group})-[:WROTE]->(r:Review)-[:REVIEWED]->(h:Hotel)
+        WITH h, AVG(r.score_overall) AS avg_rating
         ORDER BY avg_rating DESC
         LIMIT 10
+        MATCH p = (h)-[:LOCATED_IN]->(c:City)
+        RETURN p
         """
         with self.driver.session() as session:
-            return session.run(query, age_group=age_group).data()  
+            result = session.run(query, age_group=age_group)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #28. hotels with no visa requirements
     def get_hotels_with_no_visa_requirements(self):
         query = """
-        MATCH (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)-[:LOCATED_IN]->(co:Country)
         WHERE NOT EXISTS {
-            MATCH (t:Traveller)-[:FROM_COUNTRY]->(tc:Country)-[:NEEDS_VISA]->(co)
+            MATCH (tc:Country)-[:NEEDS_VISA]->(co)
         }
-        RETURN DISTINCT h.name AS hotel
+        RETURN path
+        LIMIT 25
         """
         with self.driver.session() as session:
-            return session.run(query).data()   
-        
-    #29. get hotels based on one of it's cleanliness base
+            result = session.run(query)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_hotels_by_cleanliness_base(self, min_cleanliness_base):
         query = """
-        MATCH (h:Hotel)
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)
         WHERE h.cleanliness_base >= $min_cleanliness_base
-        RETURN h.name AS hotel, h.cleanliness_base AS cleanliness_base
+        RETURN path
         ORDER BY h.cleanliness_base DESC
+        LIMIT 25
         """
         with self.driver.session() as session:
-            return session.run(query, min_cleanliness_base=min_cleanliness_base).data()
-    
+            result = session.run(query, min_cleanliness_base=min_cleanliness_base)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_hotels_by_comfort_base(self, min_comfort_base):
         query = """
-        MATCH (h:Hotel)
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)
         WHERE h.comfort_base >= $min_comfort_base
-        RETURN h.name AS hotel, h.comfort_base AS comfort_base
+        RETURN path
         ORDER BY h.comfort_base DESC
+        LIMIT 25
         """
         with self.driver.session() as session:
-            return session.run(query, min_comfort_base=min_comfort_base).data()
-        
+            result = session.run(query, min_comfort_base=min_comfort_base)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
+
     def get_hotels_by_facilities_base(self, min_facilities_base):
         query = """
-        MATCH (h:Hotel)
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)
         WHERE h.facilities_base >= $min_facilities_base
-        RETURN h.name AS hotel, h.facilities_base AS facilities_base
+        RETURN path
         ORDER BY h.facilities_base DESC
+        LIMIT 25
         """
         with self.driver.session() as session:
-            return session.run(query, min_facilities_base=min_facilities_base).data()
+            result = session.run(query, min_facilities_base=min_facilities_base)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    #30. Compare two hotels
     def compare_two_hotels(self, hotel_name, hotel_name_2):
         query = """
-        MATCH (h1:Hotel {name: $hotel1}), (h2:Hotel {name: $hotel2})
-        RETURN h1,
-               h2
+        MATCH path1 = (h1:Hotel {name: $hotel1})-[:LOCATED_IN]->(c1:City),
+              path2 = (h2:Hotel {name: $hotel2})-[:LOCATED_IN]->(c2:City)
+        RETURN path1, path2
         """
         with self.driver.session() as session:
-            return session.run(query, hotel1=hotel_name, hotel2=hotel_name_2).data()
+            result = session.run(query, hotel1=hotel_name, hotel2=hotel_name_2)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}
 
-    # 31. Get all hotels
     def get_all_hotels(self):
         query = """
-        MATCH (h:Hotel)
-        RETURN h.name AS hotel
+        MATCH path = (h:Hotel)-[:LOCATED_IN]->(c:City)
+        RETURN path
+        LIMIT 50
         """
         with self.driver.session() as session:
-            return session.run(query).data()
+            result = session.run(query)
+            return {'query': query.strip(), 'graph': self._extract_graph_data(result)}

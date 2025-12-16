@@ -2,6 +2,8 @@
 
 import pandas as pd
 import numpy as np
+import re
+import statistics
 from neo4j import GraphDatabase
 from neo4j.exceptions import ClientError
 from db_manager import DBManager
@@ -30,15 +32,26 @@ class DualEmbeddingRetriever:
         # FAISS indices per node type
         self.faiss_node2vec = {}  # {label: faiss_index}
         self.faiss_text = {}      # {label: faiss_index}
+        self.faiss_combined = {}  # {label: faiss_index}  -- text + numeric
         
         # Mappings per node type
         self.node_id_to_idx = {}  # {label: {node_id: idx}}
         self.idx_to_node_id = {}  # {label: {idx: node_id}}
         
+        # Numeric metadata per node type
+        # self.numeric_props[label] = [prop1, prop2, ...]
+        # self.numeric_stats[label] = {'min': [...],'max': [...],'mean': [...]}
+        self.numeric_props = {}
+        self.numeric_stats = {}
+
+        # Text->Node2Vec mapping weights per label
+        # self.text2node_W[label] = matrix of shape (text_dim, node2vec_dim)
+        self.text2node_W = {}
+        
         # Text model for creating embeddings
         print(" Loading Sentence Transformer...")
         self.text_model = SentenceTransformer('all-MiniLM-L6-v2')
-        print(" ✓ Model loaded")
+        print("Model loaded")
 
         #Create FAISS directory 
         os.makedirs(self.FAISS_DIR, exist_ok=True)
@@ -130,7 +143,7 @@ class DualEmbeddingRetriever:
                 SET h.textEmbedding = emb.embedding
             """, embeddings=embeddings_to_save)
         
-        print(f"  ✓ Text embeddings created for {len(embeddings_to_save)} hotels")
+        print(f"  Text embeddings created for {len(embeddings_to_save)} hotels")
     
     def build_faiss_indices(self, label):
         """Build TWO FAISS indices: Node2Vec and Text"""
@@ -165,14 +178,23 @@ class DualEmbeddingRetriever:
             print(f"   No text embeddings found for {label}!")
             return False
 
-        # Fetch both embeddings from Neo4j
+        # Fetch numeric properties for this label
+        numeric_props = self.get_numeric_properties(label)
+        self.numeric_props[label] = numeric_props
+
+        # Build dynamic return string if numeric props exist
+        numeric_return = ''
+        if numeric_props:
+            numeric_return = ', ' + ', '.join([f'n.{p} as {p}' for p in numeric_props])
+
+        # Fetch both embeddings + numeric props from Neo4j
         query = f"""
         MATCH (n:{label})
         WHERE n.{self.NODE2VEC_PROP} IS NOT NULL 
             AND n.{self.TEXT_EMBEDDING_PROP} IS NOT NULL
         RETURN n.{primary_key} as node_id,
             n.{self.NODE2VEC_PROP} as node2vec_embedding,
-            n.{self.TEXT_EMBEDDING_PROP} as text_embedding
+            n.{self.TEXT_EMBEDDING_PROP} as text_embedding{numeric_return}
         ORDER BY node_id
         """
         
@@ -184,11 +206,12 @@ class DualEmbeddingRetriever:
             print(f"  No {label} with both embeddings found")
             return False
         
-        print(f"  Found {len(records)} {label}with both embeddings")
+        print(f"  Found {len(records)} {label} with both embeddings")
         
         # Prepare embedding matrices
         node2vec_list = []
         text_list = []
+        numeric_list = []
         
         # Initialize mappings
         self.node_id_to_idx[label] = {}  
@@ -202,6 +225,20 @@ class DualEmbeddingRetriever:
             
             node2vec_list.append(node2vec_emb)
             text_list.append(text_emb)
+
+            # Numeric props
+            if numeric_props:
+                num_vals = []
+                for p in numeric_props:
+                    v = record.get(p)
+                    if v is None:
+                        num_vals.append(np.nan)
+                    else:
+                        try:
+                            num_vals.append(float(v))
+                        except Exception:
+                            num_vals.append(np.nan)
+                numeric_list.append(num_vals)
             
             # Create mappings
             self.node_id_to_idx[label][node_id] = idx
@@ -214,50 +251,117 @@ class DualEmbeddingRetriever:
         print(f" Node2Vec matrix: {node2vec_matrix.shape}")
         print(f" Text matrix: {text_matrix.shape}")
         
-        # Normalize for cosine similarity
+        # Normalize text/node2vec for cosine similarity
         faiss.normalize_L2(node2vec_matrix)
         faiss.normalize_L2(text_matrix)
-        
+
+        # If numeric props exist, create normalized numeric matrix and a combined index (text + numeric)
+        combined_matrix = None
+        if numeric_props:
+            numeric_matrix = np.array(numeric_list, dtype='float32')
+            # Handle NaNs by replacing with column means
+            col_means = np.nanmean(numeric_matrix, axis=0)
+            inds = np.where(np.isnan(numeric_matrix))
+            numeric_matrix[inds] = np.take(col_means, inds[1])
+
+            # Compute min/max/mean for normalization
+            min_vals = numeric_matrix.min(axis=0)
+            max_vals = numeric_matrix.max(axis=0)
+            mean_vals = numeric_matrix.mean(axis=0)
+
+            # Save numeric stats for query-time normalization
+            self.numeric_stats[label] = {
+                'props': numeric_props,
+                'min': min_vals.tolist(),
+                'max': max_vals.tolist(),
+                'mean': mean_vals.tolist()
+            }
+
+            # Min-max normalize numeric features to [0,1]
+            denom = (max_vals - min_vals)
+            denom[denom == 0] = 1.0
+            numeric_norm = (numeric_matrix - min_vals) / denom
+
+            print(f" Numeric matrix: {numeric_norm.shape}")
+
+            # Combine TEXT + NUMERIC into one vector for semantic+numeric search
+            combined_matrix = np.hstack([text_matrix, numeric_norm.astype('float32')])
+            print(f" Combined (text+numeric) matrix: {combined_matrix.shape}")
+
+            # Normalize combined for cosine similarity
+            faiss.normalize_L2(combined_matrix)
+
         # Build FAISS indices
         print(" Building indices...")
         
         # Index 1: Node2Vec 
         self.faiss_node2vec[label] = faiss.IndexFlatIP(self.NODE2VEC_DIM)
         self.faiss_node2vec[label].add(node2vec_matrix)
-        print(f"    ✓ Node2Vec index: {self.faiss_node2vec[label].ntotal} vectors")
+        print(f"    Node2Vec index: {self.faiss_node2vec[label].ntotal} vectors")
         
         # Index 2: Text
         self.faiss_text[label] = faiss.IndexFlatIP(self.TEXT_DIM)
         self.faiss_text[label].add(text_matrix)
-        print(f"    ✓ Text index: {self.faiss_text[label].ntotal} vectors")
+        print(f"    Text index: {self.faiss_text[label].ntotal} vectors")
         
+        # Index 3: Combined (if available)
+        if combined_matrix is not None:
+            combined_dim = combined_matrix.shape[1]
+            self.faiss_combined[label] = faiss.IndexFlatIP(combined_dim)
+            self.faiss_combined[label].add(combined_matrix)
+            print(f"    Combined (text+numeric) index: {self.faiss_combined[label].ntotal} vectors")
+        # Building finished; do not save files here. Use `save_faiss_indices` to persist indices to disk.
         return True
-    
+
     def save_faiss_indices(self, label):
-        """Save both FAISS indices to disk"""
-        print("\n Saving FAISS indices for {label}...")
-        
+        """Persist FAISS indices and mapping/numeric stats for a label to disk."""
+        print(f"\n Saving FAISS indices for {label}...")
         try:
             # File paths
             node2vec_path = os.path.join(self.FAISS_DIR, f"{label}_node2vec.index")
             text_path = os.path.join(self.FAISS_DIR, f"{label}_text.index")
+            combined_path = os.path.join(self.FAISS_DIR, f"{label}_combined.index")
             mapping_path = os.path.join(self.FAISS_DIR, f"{label}_mapping.pkl")
-            
+
             # Save indices
+            if label not in self.faiss_node2vec or label not in self.faiss_text:
+                print(f"  Missing in-memory FAISS index for {label}; cannot save.")
+                return False
+
             faiss.write_index(self.faiss_node2vec[label], node2vec_path)
-            print(f"  ✓ Node2Vec saved to {node2vec_path}")
-            
+            print(f"  Node2Vec saved to {node2vec_path}")
+
             faiss.write_index(self.faiss_text[label], text_path)
-            print(f"  ✓ Text saved to {text_path}")
-            
-            # Save mappings
+            print(f"  Text saved to {text_path}")
+
+            if label in self.faiss_combined:
+                faiss.write_index(self.faiss_combined[label], combined_path)
+                print(f"  Combined index saved to {combined_path}")
+
+            # Save mappings + numeric stats
             with open(mapping_path, 'wb') as f:
                 pickle.dump({
                     'node_id_to_idx': self.node_id_to_idx[label],
-                    'idx_to_node_id': self.idx_to_node_id[label]
+                    'idx_to_node_id': self.idx_to_node_id[label],
+                    'numeric_props': self.numeric_props.get(label, []),
+                    'numeric_stats': self.numeric_stats.get(label, {})
                 }, f)
-            print(f"  ✓ Mappings saved to {mapping_path}")
-            
+            print(f"  Mappings & numeric stats saved to {mapping_path}")
+
+            # Save text->node2vec mapper if present for this label
+            try:
+                mappings2 = {}
+                if os.path.exists(mapping_path):
+                    with open(mapping_path, 'rb') as f:
+                        mappings2 = pickle.load(f)
+                if label in self.text2node_W:
+                    mappings2['text2node_W'] = self.text2node_W[label]
+                    with open(mapping_path, 'wb') as f:
+                        pickle.dump(mappings2, f)
+                    print(f"  text2node mapper saved to {mapping_path}")
+            except Exception as e:
+                print(f"  Failed to save text2node mapper: {e}")
+
             return True
         except Exception as e:
             print(f"   Error saving: {e}")
@@ -282,17 +386,29 @@ class DualEmbeddingRetriever:
         try:
             # Load indices
             self.faiss_node2vec[label] = faiss.read_index(node2vec_path)
-            print(f"  ✓ Node2Vec loaded ({self.faiss_node2vec[label].ntotal} vectors)")
+            print(f"  Node2Vec loaded ({self.faiss_node2vec[label].ntotal} vectors)")
             
             self.faiss_text[label] = faiss.read_index(text_path)
-            print(f"  ✓ Text loaded ({self.faiss_text[label].ntotal} vectors)")
+            print(f"  Text loaded ({self.faiss_text[label].ntotal} vectors)")
+
+            # Try to load combined index if it exists
+            if os.path.exists(os.path.join(self.FAISS_DIR, f"{label}_combined.index")):
+                combined_path = os.path.join(self.FAISS_DIR, f"{label}_combined.index")
+                self.faiss_combined[label] = faiss.read_index(combined_path)
+                print(f"  Combined loaded ({self.faiss_combined[label].ntotal} vectors)")
             
-            # Load mappings
+            # Load mappings + numeric stats
             with open(mapping_path, 'rb') as f:
                 mappings = pickle.load(f)
             self.node_id_to_idx[label] = mappings['node_id_to_idx']
             self.idx_to_node_id[label] = mappings['idx_to_node_id']
-            print(f"  ✓ Mappings loaded ({len(self.node_id_to_idx[label])} nodes)")
+            self.numeric_props[label] = mappings.get('numeric_props', [])
+            self.numeric_stats[label] = mappings.get('numeric_stats', {})
+            # Load text->node2vec mapper if stored
+            if 'text2node_W' in mappings:
+                self.text2node_W[label] = mappings['text2node_W']
+                print(f"  text2node mapper loaded for {label}")
+            print(f"  Mappings loaded ({len(self.node_id_to_idx[label])} nodes)")
             
             return True
         except Exception as e:
@@ -338,6 +454,40 @@ class DualEmbeddingRetriever:
                 text_props.append(prop)
         
         return text_props
+
+    def get_numeric_properties(self, label, sample_size=100):
+        """
+        Auto-detect numeric properties for a label by sampling nodes.
+        Returns a list of property names that appear numeric (int/float).
+        """
+        props = self.get_node_properties(label)
+        if not props:
+            return []
+
+        # Exclude pricing properties (no pricing data should be used)
+        exclude_keywords = ['price', 'cost']
+
+        # Sample values for properties to check types
+        sample_query = f"""
+        MATCH (n:{label})
+        RETURN n LIMIT {sample_size}
+        """
+        numeric_props = set()
+        with self.driver.session() as session:
+            res = session.run(sample_query)
+            for record in res:
+                node = record['n']
+                for prop in props:
+                    # Skip properties that look like pricing
+                    if any(k in prop.lower() for k in exclude_keywords):
+                        continue
+                    if prop in node and node[prop] is not None:
+                        val = node[prop]
+                        if isinstance(val, (int, float)):
+                            numeric_props.add(prop)
+        # Final safety filter
+        numeric_props = {p for p in numeric_props if not any(k in p.lower() for k in exclude_keywords)}
+        return list(numeric_props)
     
     def get_primary_key(self, label):
         """Determine primary key for a node label"""
@@ -468,7 +618,7 @@ class DualEmbeddingRetriever:
             if (i // save_batch_size + 1) % 10 == 0:
                 print(f"     Progress: {total_saved}/{len(embeddings_to_save)} saved...")
         
-        print(f"  ✓ Completed: {total_saved}/{len(embeddings_to_save)} saved, {failed_batches} batches failed")
+        print(f"  Completed: {total_saved}/{len(embeddings_to_save)} saved, {failed_batches} batches failed")
         
         # VERIFY embeddings were actually saved
         print(f"   Verifying embeddings in database...")
@@ -597,30 +747,281 @@ class DualEmbeddingRetriever:
         
         return self._enrich_results(label, similar_node_ids, scores, "Node2Vec similarity")
     
-    def search_by_query(self,label, query_text, top_k=5):
-        
-        print(f"\n Searching by query: '{query_text}'")
-        
-        if label not in self.faiss_text:
-            print(f"    No text index loaded for {label}")
-            return []
+    def _parse_numeric_from_query(self, label, query_text):
+        """
+        Build a normalized numeric vector from free-text query using simple heuristics.
+        - Looks for numbers in the query and tries to map them to numeric properties
+        - If no value found for a property, uses the column mean (from numeric_stats)
+        """
+        props = self.numeric_props.get(label, [])
+        stats = self.numeric_stats.get(label, {})
+        if not props or not stats:
+            return None  # No numeric info available
 
-        # Convert query to text embedding (SAME model as hotels!)
+        # Extract numbers from query
+        found_numbers = [float(x) for x in re.findall(r"\d+\.?\d*", query_text)]
+        normalized = []
+
+        for i, prop in enumerate(props):
+            prop_lower = prop.lower()
+            chosen_val = None
+            ql = query_text.lower()
+
+            # Derive keyword set from property name and common synonyms
+            tokens = re.findall(r"[a-z]+", prop_lower)
+            keywords = set(tokens)
+            synonyms = {
+                'star': ['star', 'stars', 'rating'],
+                'cleanliness': ['clean', 'cleanliness'],
+                'comfort': ['comfort'],
+                'facilities': ['facility', 'facilities'],
+                'location': ['location'],
+                'staff': ['staff'],
+                'value': ['value', 'value_for_money', 'value_for'],
+                'overall': ['overall'],
+                'score': ['score', 'scored', 'rating']
+            }
+            for t in tokens:
+                if t in synonyms:
+                    keywords.update(synonyms[t])
+
+            # Try to find a number directly adjacent to a matching keyword
+            for kw in sorted(keywords, key=lambda x: -len(x)):
+                if kw in ql:
+                    # look for patterns like 'kw 4' or '4 kw'
+                    m = re.search(rf"{kw}\W*(\d+\.?\d*)", ql)
+                    if not m:
+                        m = re.search(rf"(\d+\.?\d*)\W*{kw}", ql)
+                    if m:
+                        chosen_val = float(m.group(1))
+                        break
+                    else:
+                        # If keyword present and numbers are in query, take first number as likely target
+                        if found_numbers:
+                            chosen_val = found_numbers[0]
+                            break
+
+            # If no keyword match but the query includes exactly one number, use it as a fallback
+            if chosen_val is None and len(found_numbers) == 1:
+                chosen_val = found_numbers[0]
+
+            # Normalize using stats
+            min_vals = np.array(stats.get('min', []), dtype='float32')
+            max_vals = np.array(stats.get('max', []), dtype='float32')
+            mean_vals = np.array(stats.get('mean', []), dtype='float32')
+
+            if chosen_val is None:
+                # use mean
+                if mean_vals.size > i:
+                    normalized.append(float(mean_vals[i]))
+                else:
+                    normalized.append(0.0)
+            else:
+                # scale chosen_val using min-max
+                if min_vals.size > i and max_vals.size > i:
+                    mn = float(min_vals[i])
+                    mx = float(max_vals[i])
+                    if mx - mn == 0:
+                        normalized.append(float(0.0))
+                    else:
+                        normalized.append((float(chosen_val) - mn) / (mx - mn))
+                else:
+                    normalized.append(float(chosen_val))
+
+        return np.array(normalized, dtype='float32').reshape(1, -1)
+
+    # ==================== TEXT -> Node2Vec Mapping ====================
+    def train_text2node2vec(self, label, reg=1e-3):
+        """Train a linear mapper W so that text_embedding @ W ~= node2vec_embedding.
+        Uses ridge regression (closed-form) for speed; saves W to mapping file.
+        Returns True on success, False otherwise.
+        """
+        print(f"\n Training text->node2vec mapper for {label}...")
+        primary_key = self.get_primary_key(label)
+
+        query = f"""
+        MATCH (n:{label})
+        WHERE n.{self.TEXT_EMBEDDING_PROP} IS NOT NULL AND n.{self.NODE2VEC_PROP} IS NOT NULL
+        RETURN n.{primary_key} as node_id, n.{self.TEXT_EMBEDDING_PROP} as text_embedding, n.{self.NODE2VEC_PROP} as node2vec_embedding
+        ORDER BY node_id
+        """
+        with self.driver.session() as session:
+            result = session.run(query)
+            records = result.data()
+
+        if not records or len(records) < 10:
+            print(f"  Not enough nodes with both embeddings ({len(records)} found); need >=10")
+            return False
+
+        X = np.vstack([np.array(r['text_embedding'], dtype='float32') for r in records])  # (N, text_dim)
+        Y = np.vstack([np.array(r['node2vec_embedding'], dtype='float32') for r in records])  # (N, node2vec_dim)
+
+        # Solve ridge: W = (X^T X + reg I)^{-1} X^T Y
+        XtX = X.T @ X
+        d = XtX.shape[0]
+        XtX_reg = XtX + reg * np.eye(d, dtype='float32')
+        try:
+            W = np.linalg.solve(XtX_reg, X.T @ Y)  # shape (text_dim, node2vec_dim)
+        except Exception as e:
+            print(f"  Failed to compute mapper: {e}")
+            return False
+
+        self.text2node_W[label] = W.astype('float32')
+
+        # Persist into mapping file
+        mapping_path = os.path.join(self.FAISS_DIR, f"{label}_mapping.pkl")
+        try:
+            mappings = {}
+            if os.path.exists(mapping_path):
+                with open(mapping_path, 'rb') as f:
+                    mappings = pickle.load(f)
+            mappings['text2node_W'] = self.text2node_W[label]
+            with open(mapping_path, 'wb') as f:
+                pickle.dump(mappings, f)
+            print(f"  text2node mapper saved to {mapping_path}")
+        except Exception as e:
+            print(f"  Failed to save mapper: {e}")
+            return False
+
+        print(f"  Mapper trained using {X.shape[0]} samples; W shape: {W.shape}")
+        return True
+
+    def load_text2node2vec(self, label):
+        """Load text->node2vec mapper for label from mapping file (if present)."""
+        if label in self.text2node_W:
+            return True
+        mapping_path = os.path.join(self.FAISS_DIR, f"{label}_mapping.pkl")
+        if not os.path.exists(mapping_path):
+            return False
+        try:
+            with open(mapping_path, 'rb') as f:
+                mappings = pickle.load(f)
+            if 'text2node_W' in mappings:
+                self.text2node_W[label] = np.array(mappings['text2node_W'], dtype='float32')
+                print(f"  Loaded text2node mapper for {label}")
+                return True
+            return False
+        except Exception as e:
+            print(f"  Failed to load mapper: {e}")
+            return False
+
+    def search_by_query_node2vec(self, query_text, label=None, top_k=5, weight=1.0):
+        """Map query text into node2vec space and search Node2Vec FAISS index(es).
+        If label is None, searches across all labels that have both W and a node2vec index.
+        """
+        print(f"\n Mapping query to Node2Vec space and searching: '{query_text}'")
+        q_text_emb = self.text_model.encode([query_text])[0].astype('float32').reshape(1, -1)
+
+        labels_to_search = []
+        if label:
+            labels_to_search = [label]
+        else:
+            labels_to_search = list(self.faiss_node2vec.keys())
+
+        results = []
+        for lbl in labels_to_search:
+            # Ensure we have a node2vec index and mapper
+            if lbl not in self.faiss_node2vec:
+                # Try to load
+                self.load_faiss_indices(lbl)
+            if lbl not in self.faiss_node2vec:
+                continue
+            if lbl not in self.text2node_W:
+                self.load_text2node2vec(lbl)
+            if lbl not in self.text2node_W:
+                # No mapper available for this label
+                continue
+
+            W = self.text2node_W[lbl]
+            # Project into node2vec space
+            try:
+                y = q_text_emb @ W  # (1, node2vec_dim)
+            except Exception as e:
+                print(f"  Projection failed for {lbl}: {e}")
+                continue
+
+            if weight != 1.0:
+                y = y * float(weight)
+
+            y = y.astype('float32')
+            faiss.normalize_L2(y)
+
+            dists, idxs = self.faiss_node2vec[lbl].search(y, top_k)
+            node_ids = [self.idx_to_node_id[lbl][idx] for idx in idxs[0]]
+            scores = dists[0].tolist()
+            enriched = self._enrich_results(lbl, node_ids, scores, 'Mapped text->Node2Vec')
+            results.extend(enriched)
+
+        # Sort aggregated results
+        results.sort(key=lambda x: x.get('score', 0.0), reverse=True)
+        return results[:top_k]
+
+    def search_by_query(self, query_text, top_k=5):
+        """Search across all available labels using the free-text query.
+        Automatically loads indices if none are loaded and aggregates/ranks results across labels.
+        """
+        print(f"\n Searching by query: '{query_text}'")
+
+        # Build query text embedding once
         query_embedding = self.text_model.encode([query_text])[0]
         query_embedding = query_embedding.astype('float32').reshape(1, -1)
-        
-        # Normalize
-        faiss.normalize_L2(query_embedding)
-        
-        # Search TEXT index (both in same 384-dim space!)
-        distances, indices = self.faiss_text.search(query_embedding, top_k)
-        
-        # Get node IDs
-        node_ids = [self.idx_to_node_id[label][idx] for idx in indices[0]]
-        scores = distances[0].tolist()
-        
-        # Enrich with details
-        return self._enrich_results(label, node_ids, scores, "Semantic text match")
+
+        # Ensure we have at least some indices loaded; if none, attempt to load indices for all labels
+        labels_to_search = [l for l in set(list(self.faiss_combined.keys()) + list(self.faiss_text.keys()))]
+        if not labels_to_search:
+            print("  No indices loaded; attempting to load indices for all labels on disk")
+            all_labels = self.get_node_labels()
+            for lbl in all_labels:
+                try:
+                    self.load_faiss_indices(lbl)
+                except Exception:
+                    continue
+            labels_to_search = [l for l in set(list(self.faiss_combined.keys()) + list(self.faiss_text.keys()))]
+
+        if not labels_to_search:
+            print("  No indices available to search")
+            return []
+
+        results = []
+
+        for label in labels_to_search:
+            # If combined index exists, prefer it
+            if label in self.faiss_combined and label in self.numeric_props and label in self.numeric_stats:
+                num_vec = self._parse_numeric_from_query(label, query_text)
+                if num_vec is None:
+                    # Build numeric vector as column means if no explicit numeric info
+                    mean_vals = np.array(self.numeric_stats[label]['mean'], dtype='float32')
+                    min_vals = np.array(self.numeric_stats[label]['min'], dtype='float32')
+                    max_vals = np.array(self.numeric_stats[label]['max'], dtype='float32')
+                    denom = (max_vals - min_vals)
+                    denom[denom == 0] = 1.0
+                    num_vec = ((mean_vals - min_vals) / denom).astype('float32').reshape(1, -1)
+
+                combined_query = np.hstack([query_embedding, num_vec])
+                faiss.normalize_L2(combined_query)
+                dists, idxs = self.faiss_combined[label].search(combined_query, top_k)
+                node_ids = [self.idx_to_node_id[label][idx] for idx in idxs[0]]
+                scores = dists[0].tolist()
+                enriched = self._enrich_results(label, node_ids, scores, "Semantic + numeric match")
+                results.extend(enriched)
+                continue
+
+            # Otherwise fall back to text-only search if available
+            if label not in self.faiss_text:
+                continue
+
+            # Normalize and search
+            fe = query_embedding.copy()
+            faiss.normalize_L2(fe)
+            dists, idxs = self.faiss_text[label].search(fe, top_k)
+            node_ids = [self.idx_to_node_id[label][idx] for idx in idxs[0]]
+            scores = dists[0].tolist()
+            enriched = self._enrich_results(label, node_ids, scores, "Semantic text match")
+            results.extend(enriched)
+
+        # Sort aggregated results by score (descending) and return top_k overall
+        results.sort(key=lambda x: x.get('score', 0.0), reverse=True)
+        return results[:top_k]
     
     def _enrich_results(self, label, node_ids, scores, method):
         """Add node details to results"""
@@ -652,6 +1053,7 @@ class DualEmbeddingRetriever:
                 node = dict(node_details[node_id])
                 node['score'] = score
                 node['method'] = method
+                node['label'] = label
                 results.append(node)
         
         return results
@@ -689,7 +1091,7 @@ class DualEmbeddingRetriever:
                         print(f"  Skipping {label} - no text properties")
                         continue
                 else:
-                    print(f"  ✓ Found {count} {label} nodes with text embeddings")
+                    print(f"  Found {count} {label} nodes with text embeddings")
                 
                 # Step 2: Build FAISS indices
                 if not self.build_faiss_indices(label):
@@ -722,6 +1124,8 @@ def main():
     parser.add_argument('--label', type=str, help='Node label (Hotel, City, etc.)')
     parser.add_argument('--node-id', help='Node ID for similarity search')
     parser.add_argument('--query', type=str, help='Text query for semantic search')
+    parser.add_argument('--map-query', type=str, help='Map query text to Node2Vec and search (label optional)')
+    parser.add_argument('--train-mapper', type=str, help='Train text->Node2Vec mapper for a given label')
     parser.add_argument('--top-k', type=int, default=5, help='Number of results')
     
     args = parser.parse_args()
@@ -757,14 +1161,52 @@ def main():
                 )
                 print_results(results, f"Similar {args.label} nodes")
             
-            # Query search
+            # Query search (scoped to one label)
             elif args.query:
                 results = retriever.search_by_query(
-                    args.label,
                     args.query,
                     top_k=args.top_k
                 )
                 print_results(results, f"{args.label} query results")
+
+        # Global query (no label specified)
+        elif args.query:
+            # Attempt to load indices for all known labels (ignore failures)
+            print('\n Loading available indices for global search...')
+            all_labels = retriever.get_node_labels()
+            for lbl in all_labels:
+                try:
+                    retriever.load_faiss_indices(lbl)
+                except Exception:
+                    continue
+
+            results = retriever.search_by_query(args.query, top_k=args.top_k)
+            print_results(results, "Global query results")
+
+        # Train mapper if requested
+        if args.train_mapper:
+            print(f"\n Training text->Node2Vec mapper for label: {args.train_mapper}")
+            ok = retriever.train_text2node2vec(args.train_mapper)
+            print('Train mapper returned', ok)
+
+        # Mapped query: map text -> node2vec and search
+        if args.map_query:
+            # If label specified, try to load that index; otherwise load all indices
+            if args.label:
+                if not retriever.load_faiss_indices(args.label):
+                    print(f"\n Run --setup first for label {args.label}!")
+                results = retriever.search_by_query_node2vec(args.map_query, label=args.label, top_k=args.top_k)
+                print_results(results, f"Mapped Node2Vec query results (label={args.label})")
+            else:
+                print('\n Loading indices for mapped global search...')
+                all_labels = retriever.get_node_labels()
+                for lbl in all_labels:
+                    try:
+                        retriever.load_faiss_indices(lbl)
+                    except Exception:
+                        continue
+                results = retriever.search_by_query_node2vec(args.map_query, label=None, top_k=args.top_k)
+                print_results(results, "Mapped Node2Vec global query results")
         
         # Demo
         if not any([args.setup, args.label]):
@@ -780,6 +1222,10 @@ def main():
             print("python generalized_dual_retriever.py --label Hotel --query 'luxury spa'")
             print("\n# Search cities by query")
             print("python generalized_dual_retriever.py --label City --query 'beach paradise'")
+            print("\n# Train text->Node2Vec mapper for Hotel")
+            print("python generalized_dual_retriever.py --train-mapper Hotel")
+            print("\n# Map query to Node2Vec and search (global)")
+            print("python generalized_dual_retriever.py --map-query '3 star cleanliness' --top-k 5")
             print("="*70)
         
         db.close()
