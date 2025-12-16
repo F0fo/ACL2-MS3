@@ -5,15 +5,18 @@ from entity_extractor import extract_entities
 from entity_extractor import get_cypher_params
 from graph_retrieval import GraphRetriever
 from db_manager import DBManager
-#from embeddings import DualEmbeddingRetriever #search_by_query
+from embeddings_retreiver import HotelEmbeddingRetriever  # Unified retriever with location filtering
 
 from pypdf import PdfReader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS as LCFAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain.chains import RetrievalQA
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_classic.chains import RetrievalQA
 from langchain_huggingface import ChatHuggingFace
-from langchain.llms.base import LLM
+from langchain_core.language_models.llms import LLM
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.documents import Document
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from typing import Optional, List, Any
 from pydantic import BaseModel, Field
 
@@ -28,22 +31,78 @@ from transformers import AutoTokenizer
 import pandas as pd
 load_dotenv()
 
+
 class LangChainWrapper(LLM):
     client: Any = Field(...)
     max_tokens: int = 500  # sets a default max output length
 
+    @property
     def _llm_type(self) -> str:
         return "mistral_hf_api"
 
     # what LangChain calls when it needs the LLM to answer something
-    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
-        response = self.client.chat_completion(  # call the HuggingFace API
-            messages=[{"role": "user", "content": prompt}],
-            # Wrap the plain text prompt into chat format because Gemma ONLY understands chat messages.
-            max_tokens=self.max_tokens,
-            temperature=0.2,
-        )
-        return response.choices[0].message["content"]
+    def _call(self, prompt: str, stop: Optional[List[str]] = None, **kwargs) -> str:
+        try:
+            # Truncate prompt if too long
+            max_prompt_chars = 3000
+            if len(prompt) > max_prompt_chars:
+                prompt = prompt[:max_prompt_chars] + "\n\n[Context truncated for length]"
+
+            response = self.client.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=self.max_tokens,
+                temperature=0.2,
+            )
+            return response.choices[0].message["content"]
+        except Exception as e:
+            error_msg = str(e)
+            print(f"LLM API Error: {error_msg}")
+            return f"Error generating response: {error_msg[:200]}"
+
+
+class DualEmbeddingRetrieverWrapper(BaseRetriever):
+    """Wrapper to make DualEmbeddingRetriever compatible with LangChain"""
+    retriever: Any = Field(...)
+    k: int = 5
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def _get_relevant_documents(
+        self, query: str, *, run_manager: CallbackManagerForRetrieverRun = None
+    ) -> List[Document]:
+        """Retrieve documents using HotelEmbeddingRetriever"""
+        try:
+            # Use the search_by_query method from our custom retriever
+            results = self.retriever.search_by_query(query, top_k=self.k)
+
+            # Convert results to LangChain Documents
+            documents = []
+            for result in results:
+                # Create document content from hotel info
+                # Note: results use 'hotel' key for name, not 'name'
+                hotel_name = result.get('hotel') or result.get('name', 'Unknown')
+                content = f"Hotel: {hotel_name}\n"
+                content += f"City: {result.get('city', 'Unknown')}, Country: {result.get('country', 'Unknown')}\n"
+                content += f"Star Rating: {result.get('star_rating', 'N/A')}\n"
+                content += f"Average Score: {result.get('avg_score', 'N/A')}\n"
+                content += f"Cleanliness: {result.get('cleanliness', 'N/A')}\n"
+                content += f"Comfort: {result.get('comfort', 'N/A')}\n"
+                content += f"Facilities: {result.get('facilities', 'N/A')}\n"
+                content += f"Location Score: {result.get('location', 'N/A')}\n"
+
+                doc = Document(
+                    page_content=content,
+                    metadata={"hotel_id": result.get("hotel_id"), "score": result.get("score")}
+                )
+                documents.append(doc)
+
+            return documents
+        except Exception as e:
+            print(f"Error in retrieval: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
 
 
 #################################### 1) BASELINE ###################################################################
@@ -113,42 +172,19 @@ def process_query_for_baseline(user_query,driver):
 
 #################################### 2) EMBEDDING ###################################################################
 def build_shared_retriever(db_manager: Optional[DBManager] = None):
-    # Try to construct a reusable retriever from your project's DualEmbeddingRetriever
+    # Try to construct a reusable retriever from HotelEmbeddingRetriever (with location filtering)
     try:
-        pdf_path = "./documents/ms1_checklist.pdf"
+        # Create the unified hotel retriever (uses 'feature' model by default)
+        hotel_retriever = HotelEmbeddingRetriever(db_manager.driver, model_type='feature')
 
-        reader = PdfReader(pdf_path)
-        all_text = ""
+        # Wrap it for LangChain compatibility
+        retriever = DualEmbeddingRetrieverWrapper(retriever=hotel_retriever, k=5)
 
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                all_text += text + "\n"
-
-        # chunk using langchain
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=400,
-            chunk_overlap=100
-        )
-        documents = splitter.create_documents([all_text])
-        len(documents)
-
-        # embedding using langchain
-        embedding_model = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
-        )
-
-        # create FAISS retriever
-        vectorstore = LCFAISS.from_documents(
-            documents=documents,
-            embedding=embedding_model
-        )
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
-        # If you have DualEmbeddingRetriever implemented, uncomment and use it:
-        # retriever = DualEmbeddingRetriever(db_manager.driver)
-        # return retriever
-        return retriever  # force fallback in this template
-    except Exception:
+        return retriever
+    except Exception as e:
+        print(f"Failed to build retriever: {e}")
+        import traceback
+        traceback.print_exc()
         # Fallback: return a dummy retriever so code paths work without the full embeddings pipeline
         return "FAILED_TO_BUILD_RETRIEVER"
 
@@ -241,35 +277,115 @@ def evaluate_model(qa_chain,model_name, tokenizer_name,question,model_pricing,re
 
 #################################### 4) MAIN FUNCTION ###################################################################
 
-def call_llm(query):
+def format_context_for_llm(context):
+    """Format the baseline context into a readable string for the LLM"""
+    if not context:
+        return "No context available."
+
+    formatted = []
+    total_chars = 0
+    MAX_CHARS = 4000  # Increased limit for more context
+
+    # Important property keys to include
+    IMPORTANT_KEYS = [
+        'name', 'text', 'city', 'country', 'star_rating',
+        'score_overall', 'score_cleanliness', 'score_comfort', 'score_facilities', 'score_location',
+        'avg_cleanliness', 'avg_comfort', 'avg_facilities', 'avg_location', 'avg_reviewer_score',
+        'review_count', 'type', 'gender', 'age_group'
+    ]
+
+    for idx, ctx in enumerate(context, 1):
+        if not ctx or total_chars > MAX_CHARS:
+            continue
+
+        if isinstance(ctx, dict):
+            if 'rows' in ctx and ctx['rows']:
+                # Format tabular data
+                formatted.append(f"\n--- Data Set {idx} ---")
+                for row in ctx['rows'][:8]:  # Limit to 8 rows
+                    row_str = str(row)
+                    if total_chars + len(row_str) < MAX_CHARS:
+                        formatted.append(row_str)
+                        total_chars += len(row_str)
+
+            elif 'graph' in ctx:
+                # Format graph data - extract nodes by type
+                nodes = ctx['graph'].get('nodes', [])
+                hotels = []
+                reviews = []
+                other = []
+
+                for node in nodes:
+                    labels = node.get('labels', [])
+                    props = node.get('properties', {})
+                    if not props:
+                        continue
+
+                    # Filter to important properties
+                    filtered = {k: v for k, v in props.items() if k in IMPORTANT_KEYS and v is not None}
+
+                    if 'Hotel' in labels:
+                        hotels.append(filtered)
+                    elif 'Review' in labels:
+                        # Truncate review text if too long
+                        if 'text' in filtered and len(str(filtered['text'])) > 200:
+                            filtered['text'] = str(filtered['text'])[:200] + "..."
+                        reviews.append(filtered)
+                    else:
+                        other.append(filtered)
+
+                # Add hotels first
+                if hotels:
+                    formatted.append(f"\n--- Hotels ---")
+                    for h in hotels[:3]:
+                        h_str = str(h)
+                        if total_chars + len(h_str) < MAX_CHARS:
+                            formatted.append(h_str)
+                            total_chars += len(h_str)
+
+                # Add reviews
+                if reviews:
+                    formatted.append(f"\n--- Reviews ---")
+                    for r in reviews[:5]:  # Limit reviews
+                        r_str = str(r)
+                        if total_chars + len(r_str) < MAX_CHARS:
+                            formatted.append(r_str)
+                            total_chars += len(r_str)
+
+        elif isinstance(ctx, list):
+            formatted.append(f"\n--- Data {idx} ---")
+            for item in ctx[:5]:
+                item_str = str(item)
+                if total_chars + len(item_str) < MAX_CHARS:
+                    formatted.append(item_str)
+                    total_chars += len(item_str)
+
+    return "\n".join(formatted) if formatted else "No relevant data found."
+
+
+def call_llm(query, baseline_context=None):
 
     db_manager = DBManager()
     HF_TOKEN = os.getenv("HUGGING_FACE_API_KEY")
     if not HF_TOKEN:
         print("HUGGING_FACE_API_KEY not found in environment variables.")
 
+    #  -------------- 1) Format baseline context --------------
+    context_str = format_context_for_llm(baseline_context) if baseline_context else ""
 
-    #  -------------- 1) get baseline --------------
+    Persona = "You are a knowledgeable and friendly hotel recommender assistant named Jarvis."
+    enhanced_query = f'''{Persona}
 
+Your goal is to help users with hotel recommendations based on the provided data.
+Compare options objectively and provide practical recommendations.
+Do not invent hotel details - only use information from the context provided.
 
-    # context = process_query_for_baseline(query, db_manager.driver)
-    # print(context)
-    #
-    # Persona = "You are a knowledgeable and friendly hotel recommender assistant and your name is Jarvis."
-    # Task = f'''
-    #         {Persona} Start any reply with Sir.
-    #
-    #         Your goal is given the user's query, help users choose hotels that best match their intents like
-    #         location preferences, comfort needs and so on.
-    #
-    #         Compare multiple hotel options objectively, highlight trade-offs, and provide concise, practical recommendations.
-    #
-    #         You avoid exaggeration, do not invent hotel details, and prioritize user preferences over generic popularity.
-    #
-    #         User's query: {query}
-    #
-    #         Use the following data (that was retrieved based on the query) as context/baseline information to help with the recommendations: {context}
-    #         '''
+User's query: {query}
+
+Retrieved hotel data:
+{context_str}
+
+Please answer the user's query based on the above data.'''
 
     #  -------------- 2) Build or reuse a shared retriever (embeddings + vectorstore). --------------
     shared_retriever = build_shared_retriever(db_manager)
@@ -279,14 +395,14 @@ def call_llm(query):
     mistral_qa = create_Mistral_llm(shared_retriever, HF_TOKEN)
     llama_qa = create_LLama_llm(shared_retriever, HF_TOKEN)
 
-
-    answer_gemma = gemma_qa.run(query)
+    # Use enhanced query with context
+    answer_gemma = gemma_qa.run(enhanced_query)
     print("Gemma answer:\n", answer_gemma)
 
-    answer_mistral = mistral_qa.run(query)
+    answer_mistral = mistral_qa.run(enhanced_query)
     print("Mistral answer:\n", answer_mistral)
 
-    answer_llama = llama_qa.run(query)
+    answer_llama = llama_qa.run(enhanced_query)
     print("Llama answer:\n", answer_llama)
 
     # -------------- 4) Get accuracy or similarity if reference answer is available -------------------

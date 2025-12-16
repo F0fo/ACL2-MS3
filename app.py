@@ -136,7 +136,7 @@ if user_question:
     st.subheader("AI Response")
     try:
         with st.spinner(f"Generating response with {model_option}..."):
-            answer_gemma, answer_mistral, answer_llama = call_llm(user_question)
+            answer_gemma, answer_mistral, answer_llama = call_llm(user_question, baseline_context=valid_context)
 
         # Select answer based on model choice
         if model_option == "Gemma":

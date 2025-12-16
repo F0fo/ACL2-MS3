@@ -208,47 +208,53 @@
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Query Embedding}
+\begin{frame}{Query Embedding (Feature-Based Model)}
 \begin{columns}
 \begin{column}{0.5\textwidth}
-\textbf{Model:} \texttt{all-MiniLM-L6-v2}
+\textbf{Text Encoder:} \texttt{all-MiniLM-L6-v2}
 
-\textbf{Properties:}
+\textbf{Text-to-Feature Mapping:}
 \begin{itemize}
-    \item Embedding dimension: 384
-    \item Optimized for semantic similarity
-    \item Used for both query and hotel embeddings
+    \item Query $\rightarrow$ 384-dim text embedding
+    \item Ridge regression mapper
+    \item Maps to 12-dim feature space
+    \item Trained on hotel descriptions
 \end{itemize}
 
-\vspace{0.3cm}
-\textbf{Code Snippet:}
+\vspace{0.2cm}
+\textbf{Training Data:}
 
 \footnotesize
-\texttt{from sentence\_transformers import SentenceTransformer}
+``\{name\} hotel in \{city\}, \{country\}.
 
-\texttt{model = SentenceTransformer('all-MiniLM-L6-v2')}
+\{stars\} star hotel with \{reviews\} reviews.
 
-\texttt{def embed\_query(text):}
-
-\texttt{~~~~return model.encode(text)}
+Average score \{avg\}. Cleanliness \{clean\}...''
 \end{column}
 
 \begin{column}{0.5\textwidth}
-\textbf{Usage in Pipeline:}
+\textbf{Query Processing Pipeline:}
 \begin{enumerate}
-    \item User query $\rightarrow$ 384-dim vector
+    \scriptsize
+    \item Extract location filter (city/country)
+    \item Extract star rating (luxury$\rightarrow$5-star)
+    \item Encode query $\rightarrow$ 384-dim
+    \item Map to feature space $\rightarrow$ 12-dim
     \item FAISS similarity search
-    \item Retrieve semantically similar hotels
-    \item Combine with Cypher results
+    \item Apply name boost (synonyms, fuzzy)
+    \item Apply attribute boost (clean, comfort)
+    \item Re-rank and filter results
 \end{enumerate}
 
-\vspace{0.3cm}
-\begin{tikzpicture}[scale=0.8]
-    \node[draw, rectangle, fill=blue!20] (q) at (0,0) {Query Text};
-    \node[draw, rectangle, fill=green!20] (e) at (3,0) {384-dim Vector};
-    \node[draw, rectangle, fill=orange!20] (f) at (6,0) {FAISS Search};
+\vspace{0.2cm}
+\begin{tikzpicture}[scale=0.7]
+    \node[draw, rectangle, fill=blue!20, font=\scriptsize] (q) at (0,0) {Query};
+    \node[draw, rectangle, fill=green!20, font=\scriptsize] (e) at (2,0) {384-d};
+    \node[draw, rectangle, fill=yellow!20, font=\scriptsize] (m) at (4,0) {12-d};
+    \node[draw, rectangle, fill=orange!20, font=\scriptsize] (f) at (6,0) {FAISS};
     \draw[->, thick] (q) -- (e);
-    \draw[->, thick] (e) -- (f);
+    \draw[->, thick] (e) -- (m);
+    \draw[->, thick] (m) -- (f);
 \end{tikzpicture}
 \end{column}
 \end{columns}
@@ -259,52 +265,63 @@
 %==============================================================================
 \section{Graph Retrieval - Baseline}
 
-\begin{frame}{Knowledge Graph Schema}
-\begin{center}
-\begin{tikzpicture}[node distance=2cm, scale=0.9, transform shape,
-    entity/.style={ellipse, draw, fill=blue!30, minimum width=1.8cm, minimum height=0.9cm},
-    rel/.style={->, >=stealth, thick, draw=gray}]
+\begin{frame}{Knowledge Graph Schema - Complete Overview}
+\begin{columns}
+\begin{column}{0.55\textwidth}
+\textbf{Node Types \& Properties:}
 
-    % Nodes
-    \node[entity] (hotel) {Hotel};
-    \node[entity, right=2.5cm of hotel] (city) {City};
-    \node[entity, right=2.5cm of city] (country) {Country};
-    \node[entity, below=1.5cm of hotel] (review) {Review};
-    \node[entity, below=1.5cm of review] (traveller) {Traveller};
+\vspace{0.2cm}
+\footnotesize
+\begin{tabular}{|l|p{5cm}|}
+\hline
+\textbf{Node} & \textbf{Properties} \\
+\hline
+\textbf{Hotel} & hotel\_id, name, star\_rating, avg\_reviewer\_score, review\_count, avg\_cleanliness, avg\_comfort, avg\_facilities, avg\_location, avg\_staff, avg\_value \\
+\hline
+\textbf{City} & name \\
+\hline
+\textbf{Country} & name \\
+\hline
+\textbf{Review} & review\_id, text, date, score\_overall, score\_cleanliness, score\_comfort, score\_facilities, score\_location, score\_staff, score\_value \\
+\hline
+\textbf{Traveller} & traveller\_id, age\_group, gender, traveller\_type \\
+\hline
+\end{tabular}
+\end{column}
 
-    % Relationships
-    \draw[rel] (hotel) -- node[above, font=\scriptsize] {LOCATED\_IN} (city);
-    \draw[rel] (city) -- node[above, font=\scriptsize] {LOCATED\_IN} (country);
-    \draw[rel] (review) -- node[left, font=\scriptsize] {REVIEWED} (hotel);
-    \draw[rel] (traveller) -- node[left, font=\scriptsize] {WROTE} (review);
-    \draw[rel] (traveller) to[bend left=30] node[right, font=\scriptsize] {STAYED\_AT} (hotel);
-    \draw[rel] (traveller) to[bend right=40] node[below, font=\scriptsize] {FROM\_COUNTRY} (country);
-    \draw[rel] (country) to[loop right, looseness=5] node[right, font=\scriptsize] {NEEDS\_VISA} (country);
+\begin{column}{0.45\textwidth}
+\textbf{Relationships (7 types):}
 
-\end{tikzpicture}
-\end{center}
+\vspace{0.2cm}
+\footnotesize
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Relationship} & \textbf{Pattern} \\
+\hline
+LOCATED\_IN & Hotel $\rightarrow$ City \\
+LOCATED\_IN & City $\rightarrow$ Country \\
+REVIEWED & Review $\rightarrow$ Hotel \\
+WROTE & Traveller $\rightarrow$ Review \\
+STAYED\_AT & Traveller $\rightarrow$ Hotel \\
+FROM\_COUNTRY & Traveller $\rightarrow$ Country \\
+NEEDS\_VISA & Country $\rightarrow$ Country \\
+\hline
+\end{tabular}
 
 \vspace{0.3cm}
-\begin{columns}
-\begin{column}{0.5\textwidth}
-\textbf{Node Properties:}
+\textbf{Graph Statistics:}
 \begin{itemize}
     \scriptsize
-    \item Hotel: name, star\_rating, cleanliness, comfort, facilities
-    \item Review: text, date, scores (overall, cleanliness, etc.)
-    \item Traveller: age, gender, type
-\end{itemize}
-\end{column}
-\begin{column}{0.5\textwidth}
-\textbf{Relationships (7 types):}
-\begin{itemize}
-    \scriptsize
-    \item LOCATED\_IN, REVIEWED, WROTE
-    \item FROM\_COUNTRY, STAYED\_AT
-    \item NEEDS\_VISA (with visa\_type property)
+    \item 25 Hotels across 25 Cities
+    \item 24 Countries with visa relations
+    \item 500+ Reviews with scores
+    \item 500+ Travellers with demographics
 \end{itemize}
 \end{column}
 \end{columns}
+
+\vspace{0.2cm}
+\textbf{Key Design:} Hotels enriched with computed averages from reviews for embedding features
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -514,108 +531,150 @@ Corporate Tower & 8.7 \\
 
 \begin{frame}{Dual Embedding Approach}
 \begin{center}
-\begin{tikzpicture}[node distance=1.5cm, scale=0.85, transform shape,
-    block/.style={rectangle, draw, fill=blue!20, text width=2.5cm, text centered, minimum height=1cm, rounded corners}]
+\begin{tikzpicture}[node distance=1.2cm, scale=0.8, transform shape,
+    block/.style={rectangle, draw, fill=blue!20, text width=2.8cm, text centered, minimum height=0.9cm, rounded corners}]
 
     % Left side - Node2Vec
-    \node[block, fill=purple!30] (graph) {Neo4j Graph};
-    \node[block, below=of graph, fill=purple!20] (n2v) {Node2Vec\\(GDS Library)};
-    \node[block, below=of n2v, fill=purple!10] (n2vemb) {128-dim\\Embeddings};
+    \node[block, fill=purple!30] (graph) {Neo4j Graph\\(Nodes + Edges)};
+    \node[block, below=of graph, fill=purple!20] (n2v) {Node2Vec\\GDS Algorithm};
+    \node[block, below=of n2v, fill=purple!10] (n2vemb) {128-dim Vectors\\(Structure-based)};
 
-    % Right side - Text
-    \node[block, right=3cm of graph, fill=green!30] (text) {Hotel Name +\\Reviews};
-    \node[block, below=of text, fill=green!20] (st) {SentenceTransformer\\all-MiniLM-L6-v2};
-    \node[block, below=of st, fill=green!10] (stemb) {384-dim\\Embeddings};
+    % Right side - Feature
+    \node[block, right=3cm of graph, fill=green!30] (props) {Hotel Properties\\+ Review Stats};
+    \node[block, below=of props, fill=green!20] (enrich) {Data Enrichment\\(Avg Scores)};
+    \node[block, below=of enrich, fill=green!10] (featemb) {12-dim Vectors\\(Property-based)};
 
     % FAISS
-    \node[block, below=1cm of n2vemb, fill=orange!30, text width=6cm] (faiss) {FAISS Indices (Cosine Similarity)};
+    \node[block, below=0.8cm of n2vemb, fill=orange!30, text width=7cm] (faiss) {FAISS Indices + Unified HotelEmbeddingRetriever};
 
     % Arrows
     \draw[->, thick] (graph) -- (n2v);
     \draw[->, thick] (n2v) -- (n2vemb);
-    \draw[->, thick] (text) -- (st);
-    \draw[->, thick] (st) -- (stemb);
+    \draw[->, thick] (props) -- (enrich);
+    \draw[->, thick] (enrich) -- (featemb);
     \draw[->, thick] (n2vemb) -- (faiss);
-    \draw[->, thick] (stemb) -- (faiss);
+    \draw[->, thick] (featemb) -- (faiss);
 
 \end{tikzpicture}
 \end{center}
 
-\vspace{0.3cm}
-\textbf{Selected Approach:} Feature Vector Embeddings (Text + Graph Structure)
+\vspace{0.2cm}
+\textbf{Implementation:} Two embedding models with unified black-box interface
+
+\textbf{Requirement:} ``Choose ONE approach, experiment with at least TWO different embedding models''
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Embedding Implementation Details}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\textbf{Node2Vec (Graph Structure):}
+\begin{itemize}
+    \scriptsize
+    \item Uses Neo4j Graph Data Science (GDS)
+    \item Random walks explore graph topology
+    \item Parameters: walkLength=40, iterations=10
+    \item Learns from node connectivity patterns
+    \item All 5 node types embedded together
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{How it works:}
+\begin{enumerate}
+    \scriptsize
+    \item Project graph to GDS catalog
+    \item Run node2vec.stream() algorithm
+    \item Extract 128-dim vectors per node
+    \item Build FAISS index for hotels only
+    \item Store hotel\_id $\leftrightarrow$ index mapping
+\end{enumerate}
+\end{column}
+
+\begin{column}{0.5\textwidth}
+\textbf{Feature-Based (Property Vectors):}
+\begin{itemize}
+    \scriptsize
+    \item Aggregates review scores per hotel
+    \item Computes: avg\_cleanliness, avg\_comfort, avg\_facilities, avg\_location, avg\_staff, avg\_value
+    \item Normalizes features to [0,1] range
+    \item Creates 12-dimensional feature vector
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{12 Feature Dimensions:}
+\begin{enumerate}
+    \scriptsize
+    \item hotel\_id (normalized)
+    \item star\_rating
+    \item review\_count (log-scaled)
+    \item avg\_reviewer\_score
+    \item avg\_cleanliness
+    \item avg\_comfort
+    \item avg\_facilities
+    \item avg\_location
+    \item avg\_staff
+    \item avg\_value
+    \item city\_id, country\_id (encoded)
+\end{enumerate}
+\end{column}
+\end{columns}
 \end{frame}
 
 %------------------------------------------------------------------------------
 \begin{frame}{Embedding Models Comparison}
 \begin{table}
 \centering
+\footnotesize
 \begin{tabular}{lcc}
 \toprule
-\textbf{Property} & \textbf{Node2Vec} & \textbf{Text Embeddings} \\
+\textbf{Property} & \textbf{Node2Vec} & \textbf{Feature-Based} \\
 \midrule
-Model & GDS Node2Vec & all-MiniLM-L6-v2 \\
-Dimension & 128 & 384 \\
-Input & Graph structure & Hotel name + reviews \\
-Captures & Relationships, paths & Semantic meaning \\
+Algorithm & GDS Node2Vec & Property Aggregation \\
+Dimension & 128 & 12 \\
+Input & Graph structure (5 node types) & Hotel properties + review stats \\
+Captures & Relationship paths, connectivity & Ratings, scores, computed averages \\
 \midrule
 Walk Length & 40 & -- \\
 Iterations & 10 & -- \\
-Buffer Size & 1000 & Batch size: 32 \\
+Features & -- & star\_rating, avg\_cleanliness, avg\_comfort, \\
+ & & avg\_facilities, avg\_location, avg\_staff, avg\_value \\
 \bottomrule
 \end{tabular}
 \caption{Embedding Configuration Comparison}
 \end{table}
 
-\vspace{0.3cm}
+\vspace{0.2cm}
 \begin{columns}
 \begin{column}{0.5\textwidth}
 \textbf{Node2Vec Strengths:}
 \begin{itemize}
+    \scriptsize
     \item Captures hotel-city-country paths
-    \item Similar locations = similar vectors
+    \item Similar locations $\rightarrow$ similar vectors
     \item Traveller connection patterns
+    \item Fast similarity lookup (4ms)
 \end{itemize}
 \end{column}
 \begin{column}{0.5\textwidth}
-\textbf{Text Embedding Strengths:}
+\textbf{Feature-Based Strengths:}
 \begin{itemize}
-    \item Semantic query matching
-    \item Review sentiment capture
-    \item Natural language queries
+    \scriptsize
+    \item Natural language query support
+    \item Location/star rating filtering
+    \item Attribute-based ranking (``best cleanliness'')
+    \item Synonym + fuzzy matching
 \end{itemize}
 \end{column}
 \end{columns}
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Embedding Retrieval Results}
+\begin{frame}{Embedding Retrieval Results - Similar Hotels}
 \begin{columns}
-\begin{column}{0.5\textwidth}
-\textbf{Text Embedding Search:}
-
-Query: ``luxury spa hotel with ocean view''
-
-\vspace{0.2cm}
-\footnotesize
-\begin{tabular}{|l|c|}
-\hline
-\textbf{Hotel} & \textbf{Score} \\
-\hline
-Ocean Paradise Resort & 0.847 \\
-Seaside Luxury Spa & 0.823 \\
-Marina Bay Wellness & 0.801 \\
-Beachfront Grand & 0.789 \\
-\hline
-\end{tabular}
-
-\vspace{0.2cm}
-Method: Semantic text match
-\end{column}
-
 \begin{column}{0.5\textwidth}
 \textbf{Node2Vec Search:}
 
-Query Hotel: ``The Azure Tower'' (Tokyo)
+Query Hotel: ``Berlin Mitte Elite''
 
 \vspace{0.2cm}
 \footnotesize
@@ -623,20 +682,179 @@ Query Hotel: ``The Azure Tower'' (Tokyo)
 \hline
 \textbf{Similar Hotel} & \textbf{Score} \\
 \hline
-Sakura Grand (Tokyo) & 0.912 \\
-Imperial Garden (Tokyo) & 0.887 \\
-Kyoto Palace (Kyoto) & 0.756 \\
-Osaka Heights (Osaka) & 0.721 \\
+Colosseum Gardens (Rome) & 0.686 \\
+Aztec Heights (Mexico City) & 0.663 \\
+Table Mountain View (Cape Town) & 0.587 \\
 \hline
 \end{tabular}
 
 \vspace{0.2cm}
-Method: Graph structure similarity
+\textbf{Finds:} Hotels with similar graph connectivity patterns (shared traveller demographics, review patterns)
+\end{column}
+
+\begin{column}{0.5\textwidth}
+\textbf{Feature-Based Search:}
+
+Query Hotel: ``Berlin Mitte Elite''
+
+\vspace{0.2cm}
+\footnotesize
+\begin{tabular}{|l|c|}
+\hline
+\textbf{Similar Hotel} & \textbf{Score} \\
+\hline
+The Kiwi Grand (Wellington) & 0.995 \\
+Han River Oasis (Seoul) & 0.979 \\
+Kremlin Suites (Moscow) & 0.977 \\
+\hline
+\end{tabular}
+
+\vspace{0.2cm}
+\textbf{Finds:} Hotels with similar ratings and review scores (5-star, high cleanliness, similar avg scores)
 \end{column}
 \end{columns}
 
 \vspace{0.3cm}
-\textbf{Key Insight:} Node2Vec finds geographically similar hotels; Text embeddings find semantically similar descriptions.
+\textbf{Key Insight:} Node2Vec captures structural similarity (traveller patterns); Feature-based captures property similarity (ratings/scores).
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Embedding Retrieval Results - Query Search}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\textbf{Query:} ``best hotels in cleanliness''
+
+\vspace{0.2cm}
+\footnotesize
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Hotel} & \textbf{Clean} & \textbf{Score} \\
+\hline
+Kyo-to Grand & 9.39 & 1.090 \\
+The Maple Grove & 9.26 & 1.249 \\
+Canal House Grand & 9.23 & 1.284 \\
+\hline
+\end{tabular}
+
+\vspace{0.2cm}
+\textbf{Feature:} Ranking query detection
+
+Detects ``best'' + ``cleanliness'' $\rightarrow$ sorts by avg\_cleanliness DESC
+\end{column}
+
+\begin{column}{0.5\textwidth}
+\textbf{Query:} ``luxury hotel in Paris''
+
+\vspace{0.2cm}
+\footnotesize
+\begin{tabular}{|l|c|}
+\hline
+\textbf{Hotel} & \textbf{Boost} \\
+\hline
+L'Etoile Palace (Paris) & synonym:luxury$\rightarrow$palace \\
+\hline
+\end{tabular}
+
+\vspace{0.2cm}
+\textbf{Features Applied:}
+\begin{itemize}
+    \scriptsize
+    \item Location filter: city = ``Paris''
+    \item Star rating filter: 5-star (luxury)
+    \item Synonym matching: luxury$\rightarrow$palace
+\end{itemize}
+\end{column}
+\end{columns}
+
+\vspace{0.2cm}
+\textbf{Query Enhancements:} Location filtering, star rating extraction, synonym matching, fuzzy typo detection, attribute boosting
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Embedding Models - Quantitative Comparison}
+\begin{table}
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metric} & \textbf{Node2Vec} & \textbf{Feature-Based} & \textbf{Winner} \\
+\midrule
+Embedding Dimension & 128 & 12 & Feature (compact) \\
+Index Build Time & $\sim$2s & $\sim$0.5s & Feature \\
+Query Latency (similar) & 2-4ms & 2-10ms & Node2Vec \\
+Query Latency (NL search) & 2-4ms & 12-36ms & Node2Vec \\
+\midrule
+NL Query Support & Keyword only & Full semantic & Feature \\
+Location Filtering & No & Yes & Feature \\
+Ranking Queries & No & Yes & Feature \\
+Synonym/Fuzzy Match & No & Yes & Feature \\
+\bottomrule
+\end{tabular}
+\caption{Performance and Feature Comparison}
+\end{table}
+
+\vspace{0.2cm}
+\textbf{Recommendation:}
+\begin{itemize}
+    \scriptsize
+    \item \textbf{Node2Vec}: Best for ``find similar hotels'' based on traveller patterns
+    \item \textbf{Feature-Based}: Best for natural language queries with filters and ranking
+    \item \textbf{Unified Interface}: HotelEmbeddingRetriever allows runtime model switching
+\end{itemize}
+\end{frame}
+
+%------------------------------------------------------------------------------
+\begin{frame}{Unified Retriever Interface}
+\textbf{Black-Box Design Pattern:} Single interface abstracts both embedding models
+
+\vspace{0.3cm}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\textbf{Simple Function API:}
+\footnotesize
+
+\texttt{from embeddings\_retreiver import}
+
+\texttt{~~~~search\_hotels, set\_model\_type}
+
+\vspace{0.2cm}
+\texttt{\# Default: feature model}
+
+\texttt{results = search\_hotels(}
+
+\texttt{~~~~"luxury hotel in Paris")}
+
+\vspace{0.2cm}
+\texttt{\# Switch to node2vec}
+
+\texttt{set\_model\_type('node2vec')}
+
+\texttt{results = search\_hotels("beach hotel")}
+\end{column}
+
+\begin{column}{0.5\textwidth}
+\textbf{Class API (more control):}
+\footnotesize
+
+\texttt{retriever = HotelEmbeddingRetriever(}
+
+\texttt{~~~~driver, model\_type='feature')}
+
+\vspace{0.2cm}
+\texttt{\# Same methods for both models}
+
+\texttt{retriever.search\_by\_query(query)}
+
+\texttt{retriever.find\_similar\_hotels(name)}
+
+\vspace{0.2cm}
+\texttt{\# Runtime model switching}
+
+\texttt{retriever.model\_type = 'node2vec'}
+\end{column}
+\end{columns}
+
+\vspace{0.3cm}
+\textbf{Auto-initialization:} Loads existing FAISS index or runs setup if needed
 \end{frame}
 
 %==============================================================================
@@ -885,20 +1103,20 @@ Cosine similarity between LLM response embedding and reference answer embedding 
 \begin{frame}{Pipeline Recap for Demo}
 \begin{center}
 \begin{tikzpicture}[node distance=0.8cm, scale=0.75, transform shape,
-    step/.style={rectangle, draw, fill=blue!20, text width=3cm, text centered, minimum height=0.7cm, rounded corners}]
+    pstep/.style={rectangle, draw, fill=blue!20, text width=3cm, text centered, minimum height=0.7cm, rounded corners}]
 
-    \node[step, fill=green!30] (s1) {1. User Query};
-    \node[step, right=of s1] (s2) {2. BERT Intent};
-    \node[step, right=of s2] (s3) {3. spaCy Entities};
-    \node[step, right=of s3] (s4) {4. Query Embed};
+    \node[pstep, fill=green!30] (s1) {1. User Query};
+    \node[pstep, right=of s1] (s2) {2. BERT Intent};
+    \node[pstep, right=of s2] (s3) {3. spaCy Entities};
+    \node[pstep, right=of s3] (s4) {4. Query Embed};
 
-    \node[step, below=0.8cm of s1, fill=orange!30] (s5) {5. Cypher Select};
-    \node[step, right=of s5, fill=orange!30] (s6) {6. Neo4j Query};
-    \node[step, right=of s6, fill=purple!30] (s7) {7. FAISS Search};
-    \node[step, right=of s7, fill=yellow!30] (s8) {8. Context Build};
+    \node[pstep, below=0.8cm of s1, fill=orange!30] (s5) {5. Cypher Select};
+    \node[pstep, right=of s5, fill=orange!30] (s6) {6. Neo4j Query};
+    \node[pstep, right=of s6, fill=purple!30] (s7) {7. FAISS Search};
+    \node[pstep, right=of s7, fill=yellow!30] (s8) {8. Context Build};
 
-    \node[step, below=0.8cm of s5, fill=red!30] (s9) {9. LLM Generate};
-    \node[step, right=of s9, fill=green!30] (s10) {10. Response};
+    \node[pstep, below=0.8cm of s5, fill=red!30] (s9) {9. LLM Generate};
+    \node[pstep, right=of s9, fill=green!30] (s10) {10. Response};
 
     \draw[->, thick] (s1) -- (s2);
     \draw[->, thick] (s2) -- (s3);

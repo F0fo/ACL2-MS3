@@ -86,8 +86,19 @@ def extract_entities(text):
             if "Male" not in entities["demographics"]:
                 entities["demographics"].append("Male")
 
-    # Extract rating criteria (cleanliness, comfort, facilities)
+    # Fallback: Direct text matching for hotel names (in case spaCy NER misses them)
     text_lower = text.lower()
+    if not entities["hotels"]:
+        for hotel in HOTELS:
+            hotel_lower = hotel.lower()
+            # Check if hotel name appears in text (handle partial matches like "azure tower" for "The Azure Tower")
+            # Remove common prefixes for matching
+            hotel_core = hotel_lower.replace("the ", "").replace("l'", "").replace("la ", "")
+            if hotel_lower in text_lower or hotel_core in text_lower:
+                if hotel not in entities["hotels"]:
+                    entities["hotels"].append(hotel)
+
+    # Extract rating criteria (cleanliness, comfort, facilities)
 
     # Keywords for each category
     cleanliness_keywords = ["cleanliness", "clean", "hygiene", "hygienic", "tidy", "spotless"]
