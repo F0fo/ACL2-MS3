@@ -85,9 +85,9 @@
 \end{center}
 
 \vspace{0.3cm}
-\textbf{Task:} Hotel Recommendation Chatbot with visa-aware travel suggestions
+\textbf{Task:} Hotel Recommendation Chatbot
 
-\textbf{Dataset:} Custom hotel reviews dataset (hotels, users, reviews, visa requirements)
+\textbf{Dataset:} Custom hotel reviews dataset (hotels, users, reviews)
 \end{frame}
 
 %==============================================================================
@@ -95,18 +95,19 @@
 %==============================================================================
 \section{Input Preprocessing}
 
-\begin{frame}{Intent Classification - BERT Fine-tuned}
+\begin{frame}{Intent Classification - Fine Tuning a BERT Model}
 \begin{columns}
 \begin{column}{0.5\textwidth}
 \textbf{Model:} \texttt{bert-base-uncased}
 
-\textbf{Training Config:}
-\begin{itemize}
-    \item Learning rate: 5e-5
-    \item Batch size: 16
-    \item Epochs: 15
-    \item Train/Test split: 85/15
-\end{itemize}
+\textbf{Dataset:} Custom labeled dataset (200 samples)
+% \textbf{Training Config:}
+% \begin{itemize}
+%     \item Learning rate: 5e-5
+%     \item Batch size: 16
+%     \item Epochs: 15
+%     \item Train/Test split: 85/15
+% \end{itemize}
 
 \vspace{0.3cm}
 \textbf{10 Intent Classes:}
@@ -149,29 +150,29 @@
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Entity Extraction - spaCy + Custom Rules}
+\begin{frame}{Entity Extraction}
 \begin{columns}
 \begin{column}{0.45\textwidth}
-\textbf{Approach:} Hybrid (NER + Token Matching)
+\textbf{Approach:} Utiize NER library dataset keyword lookups
 
 \vspace{0.2cm}
 \textbf{Entity Types Extracted:}
 \begin{itemize}
     \item \textbf{Hotels} - FAC, ORG labels + lookup
     \item \textbf{Cities/Countries} - GPE label
-    \item \textbf{Traveller Types} - Token matching
-    \item \textbf{Demographics} - Gender, Age groups
-    \item \textbf{Ratings} - Cleanliness, Comfort, Facilities
+    \item \textbf{Traveller Types} - Lookup
+    \item \textbf{Demographics (Gender + Age)} - Lookup + DATE lable
+    \item \textbf{Ratings} - Lookup
 \end{itemize}
 
 \vspace{0.2cm}
-\textbf{Traveller Keywords:}
+\textbf{Keyword Example:}
 \begin{itemize}
     \scriptsize
     \item solo, alone $\rightarrow$ ``Solo''
     \item business, corporate $\rightarrow$ ``Business''
-    \item family, families $\rightarrow$ ``Family''
-    \item couple, couples $\rightarrow$ ``Couple''
+    \item hygiene, cleanliness $\rightarrow$ cleanliness\_base
+    \item senior, older $\rightarrow$ age\_group ``55+''
 \end{itemize}
 \end{column}
 
@@ -206,56 +207,88 @@
 \end{column}
 \end{columns}
 \end{frame}
+%==============================================================================
+%  ERROR ANALYSIS & IMPROVEMENTS
+%==============================================================================
+\section{Error Analysis \& Improvements}
 
-%------------------------------------------------------------------------------
-\begin{frame}{Query Embedding (Feature-Based Model)}
-\begin{columns}
-\begin{column}{0.5\textwidth}
-\textbf{Text Encoder:} \texttt{all-MiniLM-L6-v2}
-
-\textbf{Text-to-Feature Mapping:}
+\begin{frame}[t]{Error Analysis \& Limitations}
+\vspace{0.2cm}
+\textbf{Intent Classification:}
 \begin{itemize}
-    \item Query $\rightarrow$ 384-dim text embedding
-    \item Ridge regression mapper
-    \item Maps to 12-dim feature space
-    \item Trained on hotel descriptions
+    \setlength{\itemsep}{0.2em}
+    \item Multi-intent queries not supported (``Find hotels and compare them'')
+    \item Limited training data (200 generated samples)
+    \item Out-of-domain queries classified with false confidence
+    \item No intent hierarchy or fallback mechanism
 \end{itemize}
 
-\vspace{0.2cm}
-\textbf{Training Data:}
+\vspace{0.4cm}
+\textbf{Entity Extraction:}
+\begin{itemize}
+    \setlength{\itemsep}{0.2em}
+    \item Hotel names with special characters missed (L'Étoile)
+    \item Some relies on predefined keyword lists (not adaptive)
+    \item spaCy NER misses domain-specific entities
+    \item No coreference resolution (``that hotel'')
+\end{itemize}
+\end{frame}
+%------------------------------------------------------------------------------
+\begin{frame}{Query Processing for Embeddings}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\textbf{Query-to-Embedding Flow:}
 
-\footnotesize
-``\{name\} hotel in \{city\}, \{country\}.
+\begin{enumerate}
+    \item User query received
+    \item Entity extraction (hotel names, cities)
+    \item If hotel name found $\rightarrow$ similarity search
+    \item Retrieve hotel's embedding from FAISS
+    \item Find k-nearest neighbors
+    \item Return ranked similar hotels
+\end{enumerate}
 
-\{stars\} star hotel with \{reviews\} reviews.
-
-Average score \{avg\}. Cleanliness \{clean\}...''
+\vspace{0.3cm}
+\textbf{Fallback for No Hotel Name:}
+\begin{itemize}
+    \scriptsize
+    \item Keyword matching on city/country
+    \item Use first result from KG context
+    \item Basic text similarity scoring
+\end{itemize}
 \end{column}
 
 \begin{column}{0.5\textwidth}
-\textbf{Query Processing Pipeline:}
-\begin{enumerate}
-    \scriptsize
-    \item Extract location filter (city/country)
-    \item Extract star rating (luxury$\rightarrow$5-star)
-    \item Encode query $\rightarrow$ 384-dim
-    \item Map to feature space $\rightarrow$ 12-dim
-    \item FAISS similarity search
-    \item Apply name boost (synonyms, fuzzy)
-    \item Apply attribute boost (clean, comfort)
-    \item Re-rank and filter results
-\end{enumerate}
+\textbf{FAISS Similarity Search:}
 
 \vspace{0.2cm}
 \begin{tikzpicture}[scale=0.7]
-    \node[draw, rectangle, fill=blue!20, font=\scriptsize] (q) at (0,0) {Query};
-    \node[draw, rectangle, fill=green!20, font=\scriptsize] (e) at (2,0) {384-d};
-    \node[draw, rectangle, fill=yellow!20, font=\scriptsize] (m) at (4,0) {12-d};
-    \node[draw, rectangle, fill=orange!20, font=\scriptsize] (f) at (6,0) {FAISS};
+    \node[draw, rectangle, fill=blue!20, font=\scriptsize, text width=1.5cm, align=center] (q) at (0,0) {Hotel Name};
+    \node[draw, rectangle, fill=green!20, font=\scriptsize, text width=1.5cm, align=center] (e) at (2.5,0) {Get Embedding};
+    \node[draw, rectangle, fill=yellow!20, font=\scriptsize, text width=1.5cm, align=center] (m) at (5,0) {FAISS Search};
+    \node[draw, rectangle, fill=orange!20, font=\scriptsize, text width=1.5cm, align=center] (f) at (7.5,0) {Top-K Hotels};
     \draw[->, thick] (q) -- (e);
     \draw[->, thick] (e) -- (m);
     \draw[->, thick] (m) -- (f);
 \end{tikzpicture}
+
+\vspace{0.3cm}
+\textbf{Index Structure:}
+\begin{itemize}
+    \scriptsize
+    \item Normalized L2 embeddings
+    \item IndexFlatIP (Inner Product)
+    \item Cosine similarity after normalization
+    \item Separate index per model (Node2Vec/FastRP)
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{Storage:}
+\begin{itemize}
+    \scriptsize
+    \item Neo4j: node2vecEmbedding, fastRPEmbedding
+    \item FAISS: faiss\_hotel\_index.bin, faiss\_hotel\_fastrp\_index.bin
+\end{itemize}
 \end{column}
 \end{columns}
 \end{frame}
@@ -529,37 +562,38 @@ Corporate Tower & 8.7 \\
 %==============================================================================
 \section{Embedding-Based Retrieval}
 
-\begin{frame}{Dual Embedding Approach}
+\begin{frame}{Dual Node Embedding Approach}
 \begin{center}
 \begin{tikzpicture}[node distance=1.2cm, scale=0.8, transform shape,
     block/.style={rectangle, draw, fill=blue!20, text width=2.8cm, text centered, minimum height=0.9cm, rounded corners}]
 
-    % Left side - Node2Vec
-    \node[block, fill=purple!30] (graph) {Neo4j Graph\\(Nodes + Edges)};
-    \node[block, below=of graph, fill=purple!20] (n2v) {Node2Vec\\GDS Algorithm};
-    \node[block, below=of n2v, fill=purple!10] (n2vemb) {128-dim Vectors\\(Structure-based)};
+    % Shared graph input
+    \node[block, fill=blue!30] (graph) {Neo4j Graph\\(5 Node Types)};
 
-    % Right side - Feature
-    \node[block, right=3cm of graph, fill=green!30] (props) {Hotel Properties\\+ Review Stats};
-    \node[block, below=of props, fill=green!20] (enrich) {Data Enrichment\\(Avg Scores)};
-    \node[block, below=of enrich, fill=green!10] (featemb) {12-dim Vectors\\(Property-based)};
+    % Left side - Node2Vec
+    \node[block, below left=1cm and 0.5cm of graph, fill=purple!20] (n2v) {Node2Vec\\(Random Walks)};
+    \node[block, below=of n2v, fill=purple!10] (n2vemb) {128-dim Vectors\\walkLength=40};
+
+    % Right side - FastRP
+    \node[block, below right=1cm and 0.5cm of graph, fill=green!20] (frp) {FastRP\\(Random Projection)};
+    \node[block, below=of frp, fill=green!10] (frpemb) {128-dim Vectors\\iterWeights=[0,1,1,1]};
 
     % FAISS
-    \node[block, below=0.8cm of n2vemb, fill=orange!30, text width=7cm] (faiss) {FAISS Indices + Unified HotelEmbeddingRetriever};
+    \node[block, below=0.8cm of n2vemb, fill=orange!30, text width=7cm, xshift=2.5cm] (faiss) {Separate FAISS Indices + Unified HotelEmbeddingRetriever};
 
     % Arrows
     \draw[->, thick] (graph) -- (n2v);
+    \draw[->, thick] (graph) -- (frp);
     \draw[->, thick] (n2v) -- (n2vemb);
-    \draw[->, thick] (props) -- (enrich);
-    \draw[->, thick] (enrich) -- (featemb);
+    \draw[->, thick] (frp) -- (frpemb);
     \draw[->, thick] (n2vemb) -- (faiss);
-    \draw[->, thick] (featemb) -- (faiss);
+    \draw[->, thick] (frpemb) -- (faiss);
 
 \end{tikzpicture}
 \end{center}
 
 \vspace{0.2cm}
-\textbf{Implementation:} Two embedding models with unified black-box interface
+\textbf{Approach:} Node Embeddings using two different graph algorithms from Neo4j GDS
 
 \textbf{Requirement:} ``Choose ONE approach, experiment with at least TWO different embedding models''
 \end{frame}
@@ -725,55 +759,67 @@ Kremlin Suites (Moscow) & 0.685 \\
 \end{frame}
 
 %------------------------------------------------------------------------------
-\begin{frame}{Embedding Retrieval Results - Query Search}
+\begin{frame}{Embedding Comparison in UI}
 \begin{columns}
 \begin{column}{0.5\textwidth}
-\textbf{Query:} ``best hotels in cleanliness''
+\textbf{Side-by-Side Comparison:}
 
 \vspace{0.2cm}
-\footnotesize
-\begin{tabular}{|l|c|c|}
-\hline
-\textbf{Hotel} & \textbf{Clean} & \textbf{Score} \\
-\hline
-Kyo-to Grand & 9.39 & 1.090 \\
-The Maple Grove & 9.26 & 1.249 \\
-Canal House Grand & 9.23 & 1.284 \\
-\hline
-\end{tabular}
+The UI displays results from both embedding models simultaneously when a hotel is mentioned or found in context.
 
-\vspace{0.2cm}
-\textbf{Feature:} Ranking query detection
-
-Detects ``best'' + ``cleanliness'' $\rightarrow$ sorts by avg\_cleanliness DESC
-\end{column}
-
-\begin{column}{0.5\textwidth}
-\textbf{Query:} ``luxury hotel in Paris''
+\vspace{0.3cm}
+\textbf{Example Query:} ``Tell me about The Azure Tower''
 
 \vspace{0.2cm}
 \footnotesize
 \begin{tabular}{|l|c|}
 \hline
-\textbf{Hotel} & \textbf{Boost} \\
+\multicolumn{2}{|c|}{\textbf{Node2Vec Results}} \\
 \hline
-L'Etoile Palace (Paris) & synonym:luxury$\rightarrow$palace \\
+Colosseum Gardens & 0.739 \\
+Tango Suites & 0.710 \\
+The Royal Compass & 0.693 \\
 \hline
 \end{tabular}
 
 \vspace{0.2cm}
-\textbf{Features Applied:}
-\begin{itemize}
-    \scriptsize
-    \item Location filter: city = ``Paris''
-    \item Star rating filter: 5-star (luxury)
-    \item Synonym matching: luxury$\rightarrow$palace
-\end{itemize}
+\begin{tabular}{|l|c|}
+\hline
+\multicolumn{2}{|c|}{\textbf{FastRP Results}} \\
+\hline
+Gaudi's Retreat & 0.583 \\
+Marina Bay Zenith & 0.567 \\
+The Golden Oasis & 0.553 \\
+\hline
+\end{tabular}
 \end{column}
-\end{columns}
+
+\begin{column}{0.5\textwidth}
+\textbf{Why Different Results?}
 
 \vspace{0.2cm}
-\textbf{Query Enhancements:} Location filtering, star rating extraction, synonym matching, fuzzy typo detection, attribute boosting
+\begin{itemize}
+    \scriptsize
+    \item \textbf{Node2Vec:} Explores deeper graph paths via random walks
+    \item \textbf{FastRP:} Captures immediate neighborhood via projections
+    \item Same hotel can have different ``similar'' hotels
+    \item Validates both models work independently
+\end{itemize}
+
+\vspace{0.3cm}
+\textbf{UI Features:}
+\begin{itemize}
+    \scriptsize
+    \item Automatic hotel extraction from query
+    \item Falls back to first hotel in KG context
+    \item Shows rank and similarity score
+    \item Helps evaluate embedding quality
+\end{itemize}
+
+\vspace{0.2cm}
+\textbf{Selected Model:} Sidebar dropdown chooses which embedding feeds into LLM context
+\end{column}
+\end{columns}
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -782,28 +828,28 @@ L'Etoile Palace (Paris) & synonym:luxury$\rightarrow$palace \\
 \centering
 \begin{tabular}{lccc}
 \toprule
-\textbf{Metric} & \textbf{Node2Vec} & \textbf{Feature-Based} & \textbf{Winner} \\
+\textbf{Metric} & \textbf{Node2Vec} & \textbf{FastRP} & \textbf{Notes} \\
 \midrule
-Embedding Dimension & 128 & 12 & Feature (compact) \\
-Index Build Time & $\sim$2s & $\sim$0.5s & Feature \\
-Query Latency (similar) & 2-4ms & 2-10ms & Node2Vec \\
-Query Latency (NL search) & 2-4ms & 12-36ms & Node2Vec \\
+Embedding Dimension & 128 & 128 & Same dimensionality \\
+Algorithm & Random Walks & Random Projection & Different approaches \\
+Setup Time & $\sim$2-3s & $\sim$0.2s & FastRP 10x faster \\
+Query Latency & 2-4ms & 2-4ms & Similar (FAISS) \\
 \midrule
-NL Query Support & Keyword only & Full semantic & Feature \\
-Location Filtering & No & Yes & Feature \\
-Ranking Queries & No & Yes & Feature \\
-Synonym/Fuzzy Match & No & Yes & Feature \\
+GDS Function & gds.node2vec.write() & gds.fastRP.write() & Neo4j GDS \\
+Key Parameters & walkLength, iterations & iterationWeights & Tunable \\
+Memory Usage & Higher & Lower & FastRP more efficient \\
 \bottomrule
 \end{tabular}
-\caption{Performance and Feature Comparison}
+\caption{Node2Vec vs FastRP Performance Comparison}
 \end{table}
 
 \vspace{0.2cm}
-\textbf{Recommendation:}
+\textbf{Key Differences:}
 \begin{itemize}
     \scriptsize
-    \item \textbf{Node2Vec}: Best for ``find similar hotels'' based on traveller patterns
-    \item \textbf{Feature-Based}: Best for natural language queries with filters and ranking
+    \item \textbf{Node2Vec}: Captures higher-order neighborhood patterns through simulated walks
+    \item \textbf{FastRP}: Faster computation, good for large graphs, simpler hyperparameters
+    \item \textbf{Results}: Different similar hotels returned (as shown in UI comparison)
     \item \textbf{Unified Interface}: HotelEmbeddingRetriever allows runtime model switching
 \end{itemize}
 \end{frame}
@@ -823,16 +869,14 @@ Synonym/Fuzzy Match & No & Yes & Feature \\
 \texttt{~~~~search\_hotels, set\_model\_type}
 
 \vspace{0.2cm}
-\texttt{\# Default: feature model}
+\texttt{\# Default: node2vec model}
 
-\texttt{results = search\_hotels(}
-
-\texttt{~~~~"luxury hotel in Paris")}
+\texttt{results = search\_hotels("hotel in Paris")}
 
 \vspace{0.2cm}
-\texttt{\# Switch to node2vec}
+\texttt{\# Switch to fastrp}
 
-\texttt{set\_model\_type('node2vec')}
+\texttt{set\_model\_type('fastrp')}
 
 \texttt{results = search\_hotels("beach hotel")}
 \end{column}
@@ -843,19 +887,19 @@ Synonym/Fuzzy Match & No & Yes & Feature \\
 
 \texttt{retriever = HotelEmbeddingRetriever(}
 
-\texttt{~~~~driver, model\_type='feature')}
+\texttt{~~~~driver, model\_type='node2vec')}
 
 \vspace{0.2cm}
 \texttt{\# Same methods for both models}
 
-\texttt{retriever.search\_by\_query(query)}
-
 \texttt{retriever.find\_similar\_hotels(name)}
+
+\texttt{retriever.search\_by\_query(query)}
 
 \vspace{0.2cm}
 \texttt{\# Runtime model switching}
 
-\texttt{retriever.model\_type = 'node2vec'}
+\texttt{retriever.model\_type = 'fastrp'}
 \end{column}
 \end{columns}
 
@@ -903,20 +947,20 @@ comparison & compare\_two\_hotels \\
 \textbf{Persona Definition:}
 
 \footnotesize
-``You are a knowledgeable and friendly hotel recommender assistant and your name is Jarvis.''
+``You are J.A.R.V.I.S., an advanced AI hotel concierge assistant. You speak with sophisticated eloquence and always address the user as 'sir' or 'madam'. Your responses are warm yet professional, helpful and conversational - never robotic or formulaic.''
 
 \vspace{0.3cm}
 \normalsize
-\textbf{Task Instructions:}
+\textbf{Key Instructions:}
 
 \footnotesize
 \begin{itemize}
-    \item Start any reply with ``Sir''
-    \item Help users choose hotels matching their intents (location, comfort, etc.)
-    \item Compare multiple hotel options objectively
-    \item Highlight trade-offs and provide practical recommendations
-    \item Avoid exaggeration, do not invent hotel details
-    \item Prioritize user preferences over generic popularity
+    \item Address the user respectfully as ``sir'' at least once
+    \item NEVER start with ``Based on the data provided'' or similar phrases
+    \item Be conversational and natural, like having a pleasant discussion
+    \item Provide specific details without mentioning ``the data'' or ``the context''
+    \item Explain WHY hotels would be good choices
+    \item Keep responses concise but informative
 \end{itemize}
 
 \vspace{0.3cm}
@@ -924,7 +968,7 @@ comparison & compare\_two\_hotels \\
 \textbf{Context Injection:}
 
 \footnotesize
-``Use the following data (retrieved based on the query) as context/baseline information to help with recommendations: [CONTEXT]''
+Hotel information from KG retrieval and embedding search is appended to the prompt, but the LLM is instructed to present it naturally without referencing it as ``data''.
 \end{frame}
 
 %------------------------------------------------------------------------------
@@ -1037,69 +1081,7 @@ Cosine similarity between LLM response embedding and reference answer embedding 
 \end{center}
 \end{frame}
 
-%==============================================================================
-% SECTION 6: ERROR ANALYSIS & IMPROVEMENTS
-%==============================================================================
-\section{Error Analysis \& Improvements}
 
-\begin{frame}{Error Analysis \& Improvements}
-\begin{columns}
-\begin{column}{0.5\textwidth}
-\textbf{Identified Issues:}
-\begin{enumerate}
-    \item \textbf{Entity Extraction}
-    \begin{itemize}
-        \scriptsize
-        \item Hotel names with special chars missed
-        \item Age group detection inconsistent
-    \end{itemize}
-
-    \item \textbf{Intent Classification}
-    \begin{itemize}
-        \scriptsize
-        \item Confusion between search/recommendation
-        \item Multi-intent queries not handled
-    \end{itemize}
-
-    \item \textbf{Graph Retrieval}
-    \begin{itemize}
-        \scriptsize
-        \item Empty results for rare cities
-        \item Slow for complex traversals
-    \end{itemize}
-\end{enumerate}
-\end{column}
-
-\begin{column}{0.5\textwidth}
-\textbf{Improvements Made:}
-\begin{enumerate}
-    \item \textbf{Entity Extraction}
-    \begin{itemize}
-        \scriptsize
-        \item Added rating keywords (cleanliness, comfort)
-        \item Expanded traveller type vocabulary
-    \end{itemize}
-
-    \item \textbf{Intent Classification}
-    \begin{itemize}
-        \scriptsize
-        \item Increased training data per class
-        \item Added confidence threshold
-    \end{itemize}
-
-    \item \textbf{Embedding Retrieval}
-    \begin{itemize}
-        \scriptsize
-        \item Dual approach (Node2Vec + Text)
-        \item FAISS for fast similarity search
-    \end{itemize}
-\end{enumerate}
-\end{column}
-\end{columns}
-
-\vspace{0.3cm}
-\textbf{Future Work:} Multi-intent support, caching layer, conversation memory
-\end{frame}
 
 %==============================================================================
 % SECTION 7: LIVE DEMO
@@ -1140,29 +1122,33 @@ Cosine similarity between LLM response embedding and reference answer embedding 
 \vspace{0.3cm}
 \textbf{Demo Features:}
 \begin{itemize}
-    \item Switch between embedding models (Node2Vec / Text)
+    \item Switch between embedding models (Node2Vec / FastRP)
     \item Switch between LLMs (Gemma / Mistral / LLaMA)
-    \item Real-time pipeline visualization
-    \item Streamlit UI showing each processing step
+    \item Side-by-side embedding comparison
+    \item Streamlit UI with J.A.R.V.I.S. persona
 \end{itemize}
 \end{frame}
 
 %------------------------------------------------------------------------------
 \begin{frame}{Demo Queries}
-\textbf{Test Queries for Live Demo:}
+\textbf{Test Queries for Live Demo (Pre-loaded in UI):}
 
 \begin{enumerate}
     \item \textbf{Recommendation:} ``Recommend me a good hotel in Tokyo''
 
-    \item \textbf{Traveller Preference:} ``Best hotels for solo female travelers''
+    \item \textbf{Search:} ``Find hotels in Paris''
 
-    \item \textbf{Visa Query:} ``Do I need a visa to travel from India to Dubai?''
+    \item \textbf{Hotel Info:} ``Tell me about The Azure Tower''
+
+    \item \textbf{Reviews:} ``Show me reviews for The Golden Oasis''
+
+    \item \textbf{Comparison:} ``Compare The Azure Tower and L'Etoile Palace''
+
+    \item \textbf{Traveller:} ``Best hotels for business travelers''
 
     \item \textbf{Rating Filter:} ``Hotels with cleanliness rating above 9''
 
-    \item \textbf{Comparison:} ``Compare The Azure Tower and Marina Bay''
-
-    \item \textbf{Complex:} ``Find comfortable business hotels in Paris for travelers aged 25-34''
+    \item \textbf{Demographics:} ``Hotels recommended for seniors''
 \end{enumerate}
 
 \vspace{0.3cm}

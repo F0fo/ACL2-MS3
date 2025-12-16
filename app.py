@@ -221,8 +221,28 @@ if user_question:
     # Embedding Comparison
     st.subheader("Embedding Model Comparison")
 
-    # Extract hotel name from entities for similarity search
+    # Extract hotel name from entities or context results
     reference_hotel = entities.get('hotels', [None])[0] if entities.get('hotels') else None
+
+    # If no hotel in query, try to get one from the context results
+    if not reference_hotel and valid_context:
+        for ctx in valid_context:
+            if isinstance(ctx, dict):
+                # Check rows for hotel names
+                if 'rows' in ctx and ctx['rows']:
+                    for row in ctx['rows']:
+                        if 'name' in row and row['name']:
+                            reference_hotel = row['name']
+                            break
+                # Check graph nodes for hotels
+                elif 'graph' in ctx:
+                    for node in ctx['graph'].get('nodes', []):
+                        if 'Hotel' in node.get('labels', []):
+                            reference_hotel = node.get('properties', {}).get('name')
+                            if reference_hotel:
+                                break
+            if reference_hotel:
+                break
 
     if reference_hotel:
         st.caption(f"Finding hotels similar to **{reference_hotel}** using different embedding models")
@@ -267,7 +287,7 @@ if user_question:
         except Exception as e:
             st.warning(f"Could not compare embeddings: {e}")
     else:
-        st.info("Mention a hotel name in your query to compare embedding results (e.g., 'Hotels similar to The Azure Tower')")
+        st.info("No hotel found in query or results to compare embeddings")
 
     # LLM Response
     st.subheader("J.A.R.V.I.S. Response")

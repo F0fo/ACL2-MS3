@@ -1,7 +1,17 @@
 model,latency_sec,input_tokens,output_tokens,total_tokens,input_cost_usd,output_cost_usd,total_cost_usd,semantic_accuracy,response
-Gemma-2-2B,0.677,8,21,29,1e-06,4e-06,5e-06,0.073,"The Kyo-to Grand in Tokyo is a 5-star hotel with a high rating. 
+Gemma-2-2B,0.407,7,8,15,1e-06,2e-06,2e-06,-0.015,"I don't know. 
 "
-Mistral-7B,5.75,8,140,148,2e-06,8.4e-05,8.6e-05,0.021," Based on the information provided, I cannot recommend the Kyo-to Grand hotel in Tokyo, Japan specifically as I don't have enough details about its average score, cleanliness, comfort, facilities, and location score. However, if a 5-star hotel in Tokyo, Japan is what you're looking for, I would suggest researching other highly-rated options in the city to find one that best fits your needs and preferences. Some popular 5-star hotels in Tokyo include the Mandarin Oriental Tokyo, The Ritz-Carlton, Tokyo, and The Shangri-La Hotel, Tokyo. I would recommend checking their individual reviews, amenities, and locations to help make your decision."
-LLaMA-3.1-8B,1.657,8,109,117,2e-06,8.7e-05,9e-05,0.058,"Based on the given context, I would recommend the Kyo-to Grand hotel in Tokyo, Japan. It has a 5.0-star rating, which suggests that it is a high-quality hotel. However, I would like to note that the average score, cleanliness, comfort, facilities, and location score are not provided, which might be useful information for a more informed decision.
+Mistral-7B,5.178,7,131,138,1e-06,7.9e-05,8e-05,0.019," Based on the context provided, I cannot directly answer your question as there is no specific hotel mentioned in the context. However, I can suggest some general ways to find a hotel with good cleanliness. You can check online reviews on websites like TripAdvisor, Expedia, or Booking.com. Look for hotels with high ratings and positive reviews regarding cleanliness. Additionally, some hotel chains prioritize cleanliness and have specific cleaning protocols in place, such as Marriott's ""Commitment to Clean"" program or Hilton's ""CleanStay"" program. You can also contact the hotel directly and ask about their cleaning procedures."
+LLaMA-3.1-8B,2.552,7,187,194,2e-06,0.00015,0.000152,0.01,"I'd be happy to help you find a hotel with good cleanliness. 
 
-If you're looking for a reliable and luxurious hotel experience in Tokyo, Kyo-to Grand could be a good option to consider."
+Some popular hotel chains known for their cleanliness include:
+
+1. Marriott: Known for their high standards of cleanliness and hygiene.
+2. Hilton: Offers a range of amenities and services to ensure a clean and comfortable stay.
+3. Four Seasons: Provides luxurious accommodations with a focus on cleanliness and attention to detail.
+4. The Ritz-Carlton: Offers upscale amenities and services, including a focus on cleanliness and guest satisfaction.
+5. Accor: A global hotel chain with a range of brands, including Ibis and Novotel, which are known for their cleanliness and affordability.
+
+You can also check online reviews from sources like TripAdvisor, Yelp, or Google to see what other guests have to say about the cleanliness of a particular hotel.
+
+What's your preferred location or budget for the hotel?"
