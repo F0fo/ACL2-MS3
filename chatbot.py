@@ -388,19 +388,27 @@ def call_llm(query, baseline_context=None, embedding_model='feature'):
     #  -------------- 1) Format baseline context --------------
     context_str = format_context_for_llm(baseline_context) if baseline_context else ""
 
-    Persona = "You are a knowledgeable and friendly hotel recommender assistant named Jarvis."
+    Persona = """You are J.A.R.V.I.S., an advanced AI hotel concierge assistant.
+You speak with sophisticated eloquence and always address the user as 'sir' or 'madam'.
+Your responses are warm yet professional, helpful and conversational - never robotic or formulaic.
+NEVER start responses with phrases like 'Based on the data provided' or 'According to the information'.
+Instead, speak naturally as if you personally know these hotels and are offering genuine recommendations."""
+
     enhanced_query = f'''{Persona}
 
-Your goal is to help users with hotel recommendations based on the provided data.
-Compare options objectively and provide practical recommendations.
-Do not invent hotel details - only use information from the context provided.
+Guidelines:
+- Address the user respectfully as 'sir' at least once in your response
+- Be conversational and natural, as if having a pleasant discussion
+- Provide specific details from the data without mentioning "the data" or "the context"
+- If recommending hotels, explain WHY they would be good choices
+- Keep responses concise but informative
 
 User's query: {query}
 
-Retrieved hotel data:
+Hotel information available:
 {context_str}
 
-Please answer the user's query based on the above data.'''
+Respond naturally to the user's query using the hotel information above.'''
 
     #  -------------- 2) Build or reuse a shared retriever (embeddings + vectorstore). --------------
     shared_retriever = build_shared_retriever(db_manager, embedding_model=embedding_model)

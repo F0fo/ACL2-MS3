@@ -86,6 +86,17 @@ def extract_entities(text):
             if "Male" not in entities["demographics"]:
                 entities["demographics"].append("Male")
 
+        # Demographics - age groups (no NER label exists)
+        if token_lower in ["seniors", "senior", "elderly", "older", "retirees", "retired"]:
+            if "55+" not in entities["demographics"]:
+                entities["demographics"].append("55+")
+        elif token_lower in ["young", "youth", "younger"]:
+            if "18-24" not in entities["demographics"]:
+                entities["demographics"].append("18-24")
+        elif token_lower in ["millennials", "millennial"]:
+            if "25-34" not in entities["demographics"]:
+                entities["demographics"].append("25-34")
+
     # Fallback: Direct text matching for hotel names (in case spaCy NER misses them)
     text_lower = text.lower()
     if not entities["hotels"]:
