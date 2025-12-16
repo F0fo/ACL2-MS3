@@ -982,17 +982,9 @@ LLaMA-3.1-8B & 4.63 & 6 & 382 & 0.000307 & 0.252 \\
 \textbf{Errors Encountered \& Fixed:}
 \begin{itemize}
     \setlength{\itemsep}{0.2em}
-    \item \textbf{Robotic responses:} LLM started with ``Based on the data...''
+    \item \textbf{Robotic responses:} LLM started with Basic robotic phrases
     \begin{itemize}
         \item Fixed via persona prompt engineering
-    \end{itemize}
-    \item \textbf{Hallucinations:} Invented hotel names not in KG
-    \begin{itemize}
-        \item Fixed by injecting actual KG context
-    \end{itemize}
-    \item \textbf{API timeouts:} HuggingFace rate limits
-    \begin{itemize}
-        \item Added retry logic and error handling
     \end{itemize}
 \end{itemize}
 \end{column}
