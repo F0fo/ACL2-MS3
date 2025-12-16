@@ -975,8 +975,40 @@ LLaMA-3.1-8B & 4.63 & 6 & 382 & 0.000307 & 0.252 \\
 \end{tikzpicture}
 \end{center}
 \end{frame}
+%------------------------------------------------------------------------------
+\begin{frame}{Error Analysis \& Improvement (LLM)}
+\begin{columns}[T]
+\begin{column}{0.5\textwidth}
+\textbf{Errors Encountered \& Fixed:}
+\begin{itemize}
+    \setlength{\itemsep}{0.2em}
+    \item \textbf{Robotic responses:} LLM started with ``Based on the data...''
+    \begin{itemize}
+        \item Fixed via persona prompt engineering
+    \end{itemize}
+    \item \textbf{Hallucinations:} Invented hotel names not in KG
+    \begin{itemize}
+        \item Fixed by injecting actual KG context
+    \end{itemize}
+    \item \textbf{API timeouts:} HuggingFace rate limits
+    \begin{itemize}
+        \item Added retry logic and error handling
+    \end{itemize}
+\end{itemize}
+\end{column}
 
-
+\begin{column}{0.5\textwidth}
+\textbf{Remaining Limitations:}
+\begin{itemize}
+    \setlength{\itemsep}{0.2em}
+    \item \textbf{Gemma-2-2B:} Often gives incomplete answers due to small model size
+    \item \textbf{Low semantic accuracy:} Models struggle to match reference answers exactly
+    \item \textbf{Context length:} Large KG results may exceed token limits
+    \item \textbf{No memory:} Each query is independent, no conversation history
+\end{itemize}
+\end{column}
+\end{columns}
+\end{frame}
 
 %==============================================================================
 % SECTION 7: LIVE DEMO
